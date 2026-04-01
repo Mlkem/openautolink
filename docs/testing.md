@@ -281,8 +281,8 @@ In-car testing is harder than emulator testing but critical at key milestones �
 ### Deploying a Test Build
 
 ```powershell
-# 1. Build signed AAB
-.\gradlew :app:bundleRelease
+# 1. Build signed AAB (prompts for keystore password)
+.\scripts\bundle-release-interactive.ps1
 
 # 2. Upload to Play Console
 #    Play Console → OpenAutoLink → Testing → Internal testing → Create new release
@@ -294,6 +294,8 @@ In-car testing is harder than emulator testing but critical at key milestones �
 ```
 
 > **Turnaround time:** Play Console internal testing typically processes builds in minutes, but there's no instant deploy path. Plan testing sessions accordingly.
+>
+> **Keystore:** The signing keystore lives at `secrets/upload-key.jks` (gitignored). Create one with `scripts\create-upload-keystore.ps1` if you don't have it yet.
 
 ### Bridge Access While In-Car
 

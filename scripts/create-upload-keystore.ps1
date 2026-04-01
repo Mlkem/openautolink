@@ -2,7 +2,7 @@ param(
     [string]$OutputPath = '.\secrets\upload-key.jks',
     [string]$Alias = 'upload',
     [string]$JavaHome = 'C:\Program Files\Android\Android Studio\jbr',
-    [string]$CommonName = 'BlazeLink Upload Key',
+    [string]$CommonName = 'OpenAutoLink Upload Key',
     [string]$OrgUnit = 'Personal',
     [string]$Organization = 'Personal',
     [string]$City = 'Unknown',
