@@ -267,7 +267,103 @@ These run without hardware:
 .\gradlew :app:connectedDebugAndroidTest
 ```
 
-## 8. Testing in the Real Car
+## 8. Mock Bridge Testing (No SBC Required)
+
+The mock bridge (`scripts/mock_bridge.py`) lets you test the app's full video/audio/control pipeline without a physical SBC, phone, or car. It speaks OAL protocol directly to the app, generating synthetic H.264 video (via ffmpeg) and PCM audio (sine wave).
+
+### What You Can Test
+
+| Area | What the mock provides |
+|------|----------------------|
+| **TCP connection + handshake** | Hello exchange, phone_connected event, config_echo |
+| **Video rendering** | H.264 test pattern with timestamp — verifies MediaCodec init, SPS/PPS parsing, frame rendering |
+| **Audio playback** | 48kHz stereo PCM sine wave on media purpose — verifies AudioTrack creation, purpose routing |
+| **Session state machine** | IDLE → CONNECTING → BRIDGE_CONNECTED → PHONE_CONNECTED → STREAMING transitions |
+| **Reconnection** | Kill and restart mock — app should reconnect, wait for IDR, resume cleanly |
+| **Touch forwarding** | Touch events appear in mock bridge console output |
+| **Settings UI** | Bridge IP, codec display, all tabs functional |
+| **Stats overlay** | FPS counter, codec info, frame counts all update |
+| **Self-update UI** | Update check, download progress (requires GitHub Pages to be live) |
+
+### What You Can't Test (Requires Real SBC + Phone)
+
+- Actual AA phone session (Bluetooth, WiFi AP, aasdk)
+- Bridge protocol migration validation (B1)
+- Real H.265/VP9 codec negotiation
+- HFP call audio (B2)
+- VHAL/GNSS data from a real car
+- Hardware video decoder behavior (Qualcomm C2)
+
+### Setup
+
+1. **Install ffmpeg in WSL** (one-time):
+   ```bash
+   wsl -d Ubuntu-24.04 -- sudo apt-get install -y ffmpeg
+   ```
+
+2. **Start the mock bridge** (from PowerShell):
+   ```powershell
+   # Default: 1920x1080 @ 30fps, stereo audio
+   scripts\start-mock-bridge.ps1
+
+   # Match car display resolution:
+   scripts\start-mock-bridge.ps1 -Width 2628 -Height 800 -Fps 60
+
+   # Video only (no audio):
+   scripts\start-mock-bridge.ps1 -NoAudio
+   ```
+
+3. **Start the AAOS emulator and configure networking**:
+   ```powershell
+   # The mock bridge listens on localhost. Use adb reverse so the
+   # emulator app can reach it:
+   adb reverse tcp:5288 tcp:5288
+   adb reverse tcp:5289 tcp:5289
+   adb reverse tcp:5290 tcp:5290
+   ```
+
+4. **Configure app settings**: Set bridge IP to `127.0.0.1` (or `10.0.2.2` without adb reverse).
+
+5. **Launch the app**: Video test pattern should appear, audio should play.
+
+### Mock Bridge Console Output
+
+The mock bridge logs all events to the terminal:
+
+```
+==================================================
+  OpenAutoLink Mock Bridge
+==================================================
+  Control: 0.0.0.0:5288
+  Video:   0.0.0.0:5290 (1920x1080 @ 30fps)
+  Audio:   0.0.0.0:5289 (48kHz stereo)
+  Source:  ffmpeg test pattern
+==================================================
+  Waiting for app connection...
+
+[control] App connected from ('127.0.0.1', 54321)
+[control] App hello: OpenAutoLink App 2628x800
+[control] Simulated phone connection
+[video] App connected from ('127.0.0.1', 54322)
+[video] Sent codec config (42 bytes)
+[video] Sent IDR frame #1 (8432 bytes)
+[video] 150 frames, 30.0 fps
+[audio] App connected from ('127.0.0.1', 54323)
+```
+
+### Using a Captured H.264 File
+
+You can replay real video captured from the bridge instead of the test pattern:
+
+```powershell
+# Capture from the SBC (while a phone session is active):
+ssh khadas@192.168.137.x "timeout 10 tcpdump -i eth0 port 5290 -w -" > capture.raw
+
+# Play it back through the mock bridge:
+scripts\start-mock-bridge.ps1 -VideoFile capture.h264
+```
+
+## 9. Testing in the Real Car
 
 In-car testing is harder than emulator testing but critical at key milestones — it's the only way to validate real hardware decoders, audio routing, VHAL integration, and actual reconnection behavior.
 

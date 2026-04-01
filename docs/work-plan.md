@@ -135,15 +135,16 @@ See [docs/architecture.md](architecture.md) for full component island breakdown 
 
 Enable OTA-style self-updating so new builds can be deployed without AAB/Play Store round-trips. Critical for fast iteration on M8/M9 (no ADB access on the car).
 
-- [ ] `REQUEST_INSTALL_PACKAGES` permission + `FileProvider` for APK sharing
-- [ ] `update/` island: `UpdateManifest`, `UpdateChecker`, `AppInstaller`
-- [ ] GitHub Pages manifest check (`update.json` with versionCode, APK URL, changelog)
-- [ ] Download APK to app-internal cache, trigger `PackageInstaller` session
-- [ ] DataStore preference: self-update enabled (default: off)
-- [ ] DataStore preference: update manifest URL
-- [ ] Settings UPDATES tab: toggle, URL field, Check Now button, download progress, changelog display
-- [ ] Graceful failure if AAOS blocks `REQUEST_INSTALL_PACKAGES` (show user-friendly error)
+- [x] `REQUEST_INSTALL_PACKAGES` permission + `FileProvider` for APK sharing
+- [x] `update/` island: `UpdateManifest`, `UpdateChecker`, `AppInstaller`
+- [x] GitHub Pages manifest check (`update.json` with versionCode, APK URL, changelog)
+- [x] Download APK to app-internal cache, trigger `PackageInstaller` session
+- [x] DataStore preference: self-update enabled (default: off)
+- [x] DataStore preference: update manifest URL
+- [x] Settings UPDATES tab: toggle, URL field, Check Now button, download progress, changelog display
+- [x] Graceful failure if AAOS blocks `REQUEST_INSTALL_PACKAGES` (show user-friendly error)
 - [ ] ProGuard keep rules for serialization of `UpdateManifest`
+- [ ] Verify on car: can AAOS install APKs from non-system sources?
 
 ### M7: Vehicle Integration
 - [x] GNSS forwarding (LocationManager → NMEA → bridge)
@@ -169,6 +170,34 @@ Enable OTA-style self-updating so new builds can be deployed without AAB/Play St
 - [x] Overlay buttons (settings, stats) — pulled forward, draggable floating buttons
 - [x] App icon and logo — adaptive icon from brand asset
 - [x] Stats for nerds overlay — monospace panel with session/video stats
+
+---
+
+## 🛠️ Dev Tooling & CI/CD
+
+### CI/CD (GitHub Actions)
+- [x] **Release APK workflow** (`.github/workflows/release-apk.yml`) — triggers on GitHub Release, builds signed APK, attaches to release, updates `update.json` on gh-pages
+- [x] **Release Bridge workflow** (`.github/workflows/release-bridge.yml`) — triggers on GitHub Release, cross-compiles ARM64 binary via QEMU Docker, attaches to release
+- [x] **GitHub Pages** — serves `update.json` for app self-update at `https://mossyhub.github.io/openautolink/update.json`
+- [x] **Branch protection** — PRs to main require 1 approving review (admin exempt)
+
+### SBC Deployment
+- [x] **User installer** (`bridge/sbc/install.sh`) — one-command setup: downloads binary + scripts from GitHub, installs services
+- [x] **User setup guide** (`bridge/sbc/BUILD.md`) — flash OS → SSH → curl installer → configure → reboot
+- [x] **Unified networking** (`bridge/sbc/setup-network.sh`) — single script for car NIC + SSH NIC + USB gadget
+
+### WSL Cross-Compile (Private Dev)
+- [x] **Setup** (`scripts/setup-wsl-cross-compile.sh`) — one-time ARM64 toolchain install in WSL
+- [x] **Build** (`scripts/build-bridge-wsl.sh`) — rsyncs to WSL native fs, cross-compiles, copies binary back
+- [x] **Deploy** (`scripts/deploy-bridge.ps1`) — build + SCP + restart service on SBC, single command
+- [x] **Instructions** (`.github/instructions/bridge-dev-workflow.instructions.md`)
+
+### Mock Bridge (Local Testing)
+- [x] **Mock bridge** (`scripts/mock_bridge.py`) — Python OAL mock, ffmpeg test pattern video + sine audio
+- [x] **Launcher** (`scripts/start-mock-bridge.ps1`) — PowerShell wrapper with resolution/fps/audio args
+- [ ] Validate with AAOS emulator end-to-end
+- [ ] Add media metadata simulation (album art, track info) for M8 cluster testing
+- [ ] Add nav state simulation (maneuvers, distance) for M7/M8 testing
 
 ---
 

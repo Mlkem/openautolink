@@ -129,10 +129,10 @@ if [ -d /etc/avahi/services ] && [ -f "${TMP_DIR}/openautolink.service" ]; then
 fi
 echo ""
 
-# ── 4. USB gadget + kernel modules ───────────────────────────────────
-echo ">>> [4/6] Configuring USB gadget support..."
+# ── 4. USB gadget + kernel modules (only if not using external-nic) ──
+echo ">>> [4/6] Checking car network mode..."
 source /etc/openautolink.env 2>/dev/null || true
-if [ "${OAL_CAR_NET_MODE:-auto}" != "external-nic" ]; then
+if [ "${OAL_CAR_NET_MODE:-external-nic}" != "external-nic" ]; then
     if [ -f /boot/firmware/config.txt ]; then
         grep -q "^dtoverlay=dwc2" /boot/firmware/config.txt || \
             echo "dtoverlay=dwc2,dr_mode=peripheral" >> /boot/firmware/config.txt
