@@ -1,6 +1,8 @@
 [submodule "external/opencardev-aasdk"]
 	path = external/opencardev-aasdk
 	url = https://github.com/opencardev/aasdk.git
+	ignore = dirty
 [submodule "external/opencardev-openauto"]
 	path = external/opencardev-openauto
 	url = https://github.com/opencardev/openauto.git
+	ignore = dirty
