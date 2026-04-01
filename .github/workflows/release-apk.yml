@@ -37,7 +37,7 @@ jobs:
           UPLOAD_STORE_PASSWORD: ${{ secrets.UPLOAD_STORE_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleRelease
+          ./gradlew :app:assembleRelease -Dorg.gradle.java.home=$JAVA_HOME
 
       - name: Rename APK
         run: |
