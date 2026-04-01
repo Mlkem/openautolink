@@ -24,8 +24,8 @@ description: "Use when working on video decoding, MediaCodec configuration, Surf
 - Both OMX and C2 (Codec2) variants available. Prefer C2
 
 ## Frame Handling
-- Video frames are OAL protocol: 12-byte header + raw codec data
-- Header: `[width:u16le][height:u16le][pts_ms:u32le][flags:u16le][reserved:u16le]`
+- Video frames are OAL protocol: 16-byte header + raw codec data
+- Header: `[payload_length:u32le][width:u16le][height:u16le][pts_ms:u32le][flags:u16le][reserved:u16le]`
 - Flags bit 0: keyframe (IDR). Flags bit 1: codec config (SPS/PPS/VPS)
 - First frame MUST be codec config (SPS/PPS for H.264, VPS/SPS/PPS for H.265)
 - Drop frames until first IDR received — P-frames without reference corrupt display

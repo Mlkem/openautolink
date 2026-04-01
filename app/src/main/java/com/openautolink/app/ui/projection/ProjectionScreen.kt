@@ -1,0 +1,351 @@
+package com.openautolink.app.ui.projection
+
+import android.annotation.SuppressLint
+import android.view.MotionEvent
+import android.view.SurfaceHolder
+import android.view.SurfaceView
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.openautolink.app.R
+import com.openautolink.app.audio.AudioStats
+import com.openautolink.app.session.SessionState
+import com.openautolink.app.ui.components.DraggableOverlayButton
+import com.openautolink.app.video.VideoStats
+
+@Composable
+fun ProjectionScreen(
+    viewModel: ProjectionViewModel = viewModel(),
+    onNavigateToSettings: () -> Unit = {}
+) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    DisposableEffect(Unit) {
+        viewModel.connect()
+        onDispose {
+            // Don't disconnect on dispose — session survives config changes
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .windowInsetsPadding(WindowInsets.systemBars)
+            .testTag("projectionScreen")
+    ) {
+        // SurfaceView for video rendering — intercepts touch for forwarding to bridge
+        @SuppressLint("ClickableViewAccessibility")
+        AndroidView(
+            factory = { context ->
+                SurfaceView(context).apply {
+                    holder.addCallback(object : SurfaceHolder.Callback {
+                        override fun surfaceCreated(holder: SurfaceHolder) {
+                            viewModel.onSurfaceAvailable(
+                                holder.surface,
+                                holder.surfaceFrame.width(),
+                                holder.surfaceFrame.height()
+                            )
+                        }
+
+                        override fun surfaceChanged(
+                            holder: SurfaceHolder,
+                            format: Int,
+                            width: Int,
+                            height: Int
+                        ) {
+                            viewModel.onSurfaceAvailable(holder.surface, width, height)
+                        }
+
+                        override fun surfaceDestroyed(holder: SurfaceHolder) {
+                            viewModel.onSurfaceDestroyed()
+                        }
+                    })
+
+                    setOnTouchListener { v, event ->
+                        viewModel.onTouchEvent(event, v.width, v.height)
+                        true
+                    }
+                }
+            },
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("projectionSurface")
+        )
+
+        // Connection status HUD — centered overlay, visible when not streaming
+        if (uiState.sessionState != SessionState.STREAMING) {
+            ConnectionHud(
+                uiState = uiState,
+                modifier = Modifier.align(Alignment.Center)
+            )
+        }
+
+        // Floating overlay buttons — bottom-right, above nav bar. Draggable.
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 16.dp),
+        ) {
+            // Settings button — draggable
+            DraggableOverlayButton(
+                icon = Icons.Default.Settings,
+                contentDescription = "Settings",
+                onClick = { onNavigateToSettings() },
+                positionKey = "overlay_settings",
+                modifier = Modifier.testTag("settingsButton"),
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Stats button — draggable
+            DraggableOverlayButton(
+                icon = Icons.Default.Info,
+                contentDescription = "Stats for nerds",
+                onClick = { viewModel.toggleStats() },
+                positionKey = "overlay_stats",
+                containerColor = if (uiState.showStats) {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                } else {
+                    MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+                },
+                tint = if (uiState.showStats) {
+                    MaterialTheme.colorScheme.onPrimary
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                modifier = Modifier.testTag("statsButton"),
+            )
+        }
+
+        // Stats overlay panel — bottom-left
+        if (uiState.showStats) {
+            VideoStatsOverlay(
+                stats = uiState.videoStats,
+                audioStats = uiState.audioStats,
+                sessionState = uiState.sessionState,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(12.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun VideoStatsOverlay(
+    stats: VideoStats,
+    audioStats: AudioStats,
+    sessionState: SessionState,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.Black.copy(alpha = 0.65f))
+            .padding(10.dp)
+            .testTag("videoStatsOverlay")
+    ) {
+        Column {
+            StatLine("Stats for nerds", "", header = true)
+            Spacer(modifier = Modifier.height(4.dp))
+
+            StatLine("Session", sessionState.name)
+
+            if (stats.codec != "none") {
+                StatLine("Codec", stats.codec)
+                if (stats.width > 0) {
+                    StatLine("Resolution", "${stats.width}x${stats.height}")
+                }
+                StatLine("FPS", "${"%.1f".format(stats.fps)} fps",
+                    valueColor = if (stats.fps >= 25) Color.Green else Color.Red)
+                StatLine("Decoded", stats.framesDecoded.toString())
+                if (stats.framesDropped > 0) {
+                    StatLine("Dropped", stats.framesDropped.toString(),
+                        valueColor = Color(0xFFFFAB00))
+                }
+            } else {
+                StatLine("Video", "not active")
+            }
+
+            // Audio stats section
+            Spacer(modifier = Modifier.height(4.dp))
+            if (audioStats.activePurposes.isNotEmpty()) {
+                StatLine("Audio", audioStats.activePurposes.joinToString(", ") { it.name.lowercase() })
+                audioStats.underruns.forEach { (purpose, count) ->
+                    if (count > 0) {
+                        StatLine("${purpose.name.lowercase()} xrun", count.toString(),
+                            valueColor = Color(0xFFFFAB00))
+                    }
+                }
+            } else {
+                StatLine("Audio", "not active")
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatLine(
+    label: String,
+    value: String,
+    header: Boolean = false,
+    valueColor: Color = Color.White,
+) {
+    Row(modifier = Modifier.padding(vertical = 0.5.dp)) {
+        Text(
+            text = label,
+            color = if (header) Color(0xFF64FFDA) else Color(0xFFB0BEC5),
+            fontSize = if (header) 11.sp else 9.sp,
+            fontWeight = if (header) FontWeight.Bold else FontWeight.Normal,
+            fontFamily = FontFamily.Monospace,
+            lineHeight = if (header) 14.sp else 11.sp,
+            modifier = Modifier.width(if (header) 140.dp else 72.dp),
+        )
+        if (value.isNotEmpty()) {
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = value,
+                color = valueColor,
+                fontSize = 9.sp,
+                fontFamily = FontFamily.Monospace,
+                lineHeight = 11.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConnectionHud(
+    uiState: ProjectionUiState,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xCC000000))
+            .padding(32.dp)
+            .testTag("connectionHud"),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Image(
+                painter = painterResource(id = R.drawable.ic_logo),
+                contentDescription = "OpenAutoLink",
+                modifier = Modifier.height(120.dp),
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+                text = "OpenAutoLink",
+                style = MaterialTheme.typography.headlineLarge,
+                color = Color.White
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            when (uiState.sessionState) {
+                SessionState.IDLE -> {
+                    Text(
+                        text = "Disconnected",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = Color(0xFFB0B0B0)
+                    )
+                }
+                SessionState.CONNECTING -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(32.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        strokeWidth = 3.dp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Connecting to bridge...",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = uiState.bridgeHost,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color(0xFF808080)
+                    )
+                }
+                SessionState.BRIDGE_CONNECTED -> {
+                    Text(
+                        text = "Waiting for phone...",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                    uiState.bridgeName?.let { name ->
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Bridge: $name",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color(0xFF808080)
+                        )
+                    }
+                }
+                SessionState.PHONE_CONNECTED -> {
+                    Text(
+                        text = "Phone connected",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                    uiState.phoneName?.let { name ->
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = name,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color(0xFF808080)
+                        )
+                    }
+                }
+                SessionState.STREAMING -> {
+                    // HUD is hidden during streaming
+                }
+                SessionState.ERROR -> {
+                    Text(
+                        text = uiState.statusMessage,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        }
+    }
+}

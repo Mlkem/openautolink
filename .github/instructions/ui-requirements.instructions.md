@@ -62,6 +62,33 @@ Developer-facing. Accessible from Settings or a long-press gesture.
 - **Bridge**: Bridge-reported stats (from control channel `stats` messages)
 - **Logs**: Scrollable log view with severity filter, export button
 
+## AAOS Wide-Screen Layout Patterns
+
+The GM Blazer EV has a 2914×1134 display (~2.57:1 aspect ratio). Standard phone/tablet layouts look bad at this width. Follow these patterns:
+
+### NavigationRail for Multi-Section Screens
+- **Always use `NavigationRail`** (left sidebar with icon+label tabs) for screens with multiple sections (Settings, Diagnostics)
+- **Never use a top `TopAppBar` with full-width scrolling content** — it wastes the extreme width and looks like a phone app stretched sideways
+- Back button goes at the top of the rail column, above the tab icons
+- Content pane fills the remaining width to the right of the rail
+- Use `WindowInsets.safeDrawing` padding on the outer `Row`, not on individual elements
+
+### Content Width Constraints
+- Text fields and option lists should use `fillMaxWidth(0.5f)` to `fillMaxWidth(0.7f)` — full-width text fields at 2914px look absurd
+- Radio button groups and settings rows: cap at 70% width
+- Long-form text (descriptions, help): cap at 60% width for readability
+
+### Touch Target Sizing
+- AAOS guidelines: **76dp minimum** touch targets
+- Overlay buttons on the projection screen: use `FilledTonalButton` or `FilledTonalIconButton` with adequate padding
+- Settings radio buttons and list items: ensure the entire row is clickable, not just the radio circle
+
+### Overlay vs Full-Screen
+- The **ProjectionScreen** is always full-screen (it IS the app)
+- **SettingsScreen** is a full navigation destination (not a dialog) — uses the NavigationRail layout
+- **Stats overlay** and **Connection HUD** are transparent overlays on the projection surface
+- **Floating buttons** (Settings, Stats) use `DraggableOverlayButton` — semi-transparent, position-persisted, bottom-right default
+
 ## AAOS Display Constraints
 - GM Blazer EV: 2914×1134 physical, ~2628×800 usable with nav bar hidden
 - App should request fullscreen (hide status bar + nav bar) in projection mode

@@ -78,18 +78,19 @@ Multi-touch: `pointers` array with `id`, `x`, `y` per pointer.
 
 ## Video Channel (TCP 5290)
 
-Bridge → App only. Binary frames with a fixed 12-byte header.
+Bridge → App only. Binary frames with a fixed 16-byte header.
 
 ### Frame Format
 ```
 Offset  Size  Type    Field
-0       2     u16le   width (pixels)
-2       2     u16le   height (pixels)
-4       4     u32le   pts_ms (presentation timestamp, milliseconds)
-8       2     u16le   flags (bitfield)
-10      2     u16le   reserved (0x0000)
---- header end (12 bytes) ---
-12      N     bytes   codec payload (raw H.264/H.265/VP9)
+0       4     u32le   payload_length (bytes of codec data following header)
+4       2     u16le   width (pixels)
+6       2     u16le   height (pixels)
+8       4     u32le   pts_ms (presentation timestamp, milliseconds)
+12      2     u16le   flags (bitfield)
+14      2     u16le   reserved (0x0000)
+--- header end (16 bytes) ---
+16      N     bytes   codec payload (raw H.264/H.265/VP9)
 ```
 
 ### Flags Bitfield

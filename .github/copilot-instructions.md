@@ -34,6 +34,10 @@ Two components:
 
 > **Design test**: If a feature adds latency to connection, first-frame, or reconnection — it needs exceptional justification.
 
+## Cross-Component Rule: Always Reference the Other Side
+
+When modifying **app** code that talks to the bridge, **read the bridge source code first** (`bridge/openautolink/headless/`). When modifying **bridge** code, read the app code first. Don't trust protocol docs alone — they may describe the target design while the code implements the current (possibly legacy) format. It is acceptable to modify either side to improve the protocol, but check `docs/work-plan.md` for planned migration paths before making ad-hoc changes.
+
 ## Architecture
 
 ### App (`app/`) — Component Islands
@@ -94,7 +98,7 @@ scripts/deploy-to-sbc.ps1
 ### OAL Wire Protocol
 - **3 TCP connections**: control (5288, JSON lines), video (5290, binary frames), audio (5289, binary frames)
 - **Control**: newline-delimited JSON — no magic bytes, no checksums
-- **Video**: 12-byte header (width, height, pts_ms, flags) + raw codec payload
+- **Video**: 16-byte header (payload_length, width, height, pts_ms, flags) + raw codec payload
 - **Audio**: 8-byte header (direction, purpose, sample_rate, channels, length) + raw PCM
 - Full spec: [docs/protocol.md](docs/protocol.md)
 

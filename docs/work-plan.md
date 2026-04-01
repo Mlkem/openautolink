@@ -34,11 +34,15 @@ These exist in the current bridge code and will need fixing regardless of the ap
 
 ---
 
-## 🔧 Bridge Protocol Migration (OAL)
+## 🔧 Bridge Milestones
 
-The bridge needs to output OAL protocol to the app.
+### B1: OAL Protocol Migration
 
-### Control Channel (Port 5288) → JSON Lines
+**Blocks:** M3 (HFP audio), M5 (mic control), M6 (config sync), end-to-end testing
+
+Replace CPC200 framing (16-byte magic headers, inverted checksums, heartbeat-gated writes) with OAL protocol on all three TCP channels. The app already speaks OAL — once this lands, end-to-end streaming works.
+
+**Control Channel (Port 5288) → JSON Lines**
 - [ ] JSON line messages for all control communication
 - [ ] Hello handshake with capabilities exchange
 - [ ] Phone connected/disconnected events
@@ -48,21 +52,37 @@ The bridge needs to output OAL protocol to the app.
 - [ ] Config echo on settings change
 - [ ] Mic start/stop signals
 
-### Video Channel (Port 5290) → 16-byte Header
+**Video Channel (Port 5290) → 16-byte Header**
 - [ ] OAL 16-byte header: payload_length, width, height, pts_ms, flags
 - [ ] Flags: keyframe bit, codec config bit, EOS bit
 - [ ] First frame must be codec config (SPS/PPS)
+- [ ] Fix carry-forward #1: don't queue video until app is connected
+- [ ] Fix carry-forward #4: bypass IDR rate limit on first keyframe after new app connection
 
-### Audio Channel (Port 5289) → 8-byte Header
+**Audio Channel (Port 5289) → 8-byte Header**
 - [ ] OAL 8-byte header: direction, purpose, sample_rate, channels, length
 - [ ] Direction field (0=playback, 1=mic capture)
 - [ ] Purpose field for routing (media/nav/assistant/call/alert)
 - [ ] Bidirectional: bridge→app playback, app→bridge mic
 
-### Touch/Input Channel (via Control 5288)
+**Touch/Input Channel (via Control 5288)**
 - [ ] JSON touch events with action, coordinates, pointer array
 - [ ] GNSS NMEA forwarding
 - [ ] Vehicle data JSON
+
+**Also resolves carry-forward issues:** #1 (video startup delay), #2 (fps — verify aasdk SDR config during migration), #4 (black screen after reconnect).
+
+### B2: Bluetooth HFP + Auto-Connect
+
+**Blocks:** M3 (call audio), M5 (mic routing), M9 (voice button)
+
+Establish HFP profile so phone calls and voice assistant audio flow through the bridge.
+
+- [ ] Connect HFP profile after BT pairing (currently only BLE + RFCOMM ch8)
+- [ ] Capture SCO audio from HFP → forward as OAL PCM with call/assistant purpose
+- [ ] Forward mic PCM from app → BT SCO for phone call uplink
+- [ ] Fix carry-forward #3: deploy headunit.crt/key to `/opt/openautolink/cert/`
+- [ ] AA auto-connect via BT (phone discovers bridge, starts WiFi TCP automatically)
 
 ---
 
@@ -77,43 +97,58 @@ See [docs/architecture.md](architecture.md) for full component island breakdown 
 - [x] ProjectionScreen with SurfaceView + connection status HUD
 
 ### M2: Video
-- [ ] MediaCodec decoder with codec selection (H.264/H.265/VP9)
-- [ ] OAL video frame parsing (16-byte header)
-- [ ] NAL parsing for SPS/PPS extraction
-- [ ] Stats overlay (FPS, codec, drops)
+- [x] MediaCodec decoder with codec selection (H.264/H.265/VP9)
+- [x] OAL video frame parsing (16-byte header)
+- [x] NAL parsing for SPS/PPS extraction
+- [x] Stats overlay (FPS, codec, drops)
 
 ### M3: Audio
-- [ ] 5-purpose AudioTrack slots with ring buffers
-- [ ] OAL audio frame parsing (8-byte header)
-- [ ] Audio focus management (request/release/duck)
-- [ ] Purpose routing (media/nav/assistant/call/alert)
-- [ ] Dual audio path support — all audio flows through the bridge via TCP:
+- [x] 5-purpose AudioTrack slots with ring buffers
+- [x] OAL audio frame parsing (8-byte header)
+- [x] Audio focus management (request/release/duck)
+- [x] Purpose routing (media/nav/assistant/call/alert)
+- [ ] Dual audio path support — all audio flows through the bridge via TCP: *(blocked by B1 + B2)*
   - **AA session audio** (aasdk channels): media, navigation, alerts — decoded by aasdk, sent as PCM over OAL
   - **BT HFP audio** (phone → SBC Bluetooth): phone calls, voice assistant — bridge captures SCO audio from HFP and forwards as PCM over OAL with call/assistant purpose
 - [ ] Detect active audio purpose and manage focus (e.g., duck media during call)
 - [ ] Handle call audio transitions: ring, in-call, call end
 
 ### M4: Touch + Input
-- [ ] Touch forwarding with coordinate scaling
-- [ ] Multi-touch (POINTER_DOWN/UP for pinch zoom)
-- [ ] JSON touch serialization to control channel
+- [x] Touch forwarding with coordinate scaling
+- [x] Multi-touch (POINTER_DOWN/UP for pinch zoom)
+- [x] JSON touch serialization to control channel
 
 ### M5: Microphone + Voice
-- [ ] Timer-based mic capture from car's mic (via AAOS AudioRecord)
-- [ ] Send on audio channel (direction=1)
-- [ ] Bridge mic_start/mic_stop control messages
-- [ ] Coordinate mic routing: bridge forwards mic PCM to aasdk for AA voice, and to BT SCO for phone calls
+- [x] Timer-based mic capture from car's mic (via AAOS AudioRecord)
+- [x] Send on audio channel (direction=1)
+- [x] Mic source preference: car mic (default) or phone mic, toggled in Settings
+- [ ] Bridge mic_start/mic_stop control messages *(blocked by B1)*
+- [ ] Coordinate mic routing: bridge forwards mic PCM to aasdk for AA voice, and to BT SCO for phone calls *(blocked by B2)*
 
 ### M6: Settings + Config
-- [ ] DataStore preferences (codec, resolution, fps, display mode)
-- [ ] Settings Compose UI
-- [ ] Config sync: app → bridge → echo
+- [x] DataStore preferences (codec, resolution, fps, display mode) — basic prefs done in M1, display mode added with M2
+- [x] Settings Compose UI — bridge host/port, display mode selector
+- [ ] Config sync: app → bridge → echo *(blocked by B1)*
 - [ ] Bridge discovery (mDNS + manual IP)
 
+### M6b: Self-Update via GitHub Pages
+
+Enable OTA-style self-updating so new builds can be deployed without AAB/Play Store round-trips. Critical for fast iteration on M8/M9 (no ADB access on the car).
+
+- [ ] `REQUEST_INSTALL_PACKAGES` permission + `FileProvider` for APK sharing
+- [ ] `update/` island: `UpdateManifest`, `UpdateChecker`, `AppInstaller`
+- [ ] GitHub Pages manifest check (`update.json` with versionCode, APK URL, changelog)
+- [ ] Download APK to app-internal cache, trigger `PackageInstaller` session
+- [ ] DataStore preference: self-update enabled (default: off)
+- [ ] DataStore preference: update manifest URL
+- [ ] Settings UPDATES tab: toggle, URL field, Check Now button, download progress, changelog display
+- [ ] Graceful failure if AAOS blocks `REQUEST_INSTALL_PACKAGES` (show user-friendly error)
+- [ ] ProGuard keep rules for serialization of `UpdateManifest`
+
 ### M7: Vehicle Integration
-- [ ] GNSS forwarding (LocationManager → NMEA → bridge)
-- [ ] VHAL properties (37 properties via Car API reflection)
-- [ ] Navigation state display + maneuver icons
+- [x] GNSS forwarding (LocationManager → NMEA → bridge)
+- [x] VHAL properties (37 properties via Car API reflection)
+- [x] Navigation state display + maneuver icons
 
 ### M8: Cluster Display
 - [ ] Cluster service for navigation: turn-by-turn maneuver icons, distance, road names
@@ -128,10 +163,12 @@ See [docs/architecture.md](architecture.md) for full component island breakdown 
 - [ ] Investigate `KEYCODE_VOICE_ASSIST` / `KEYCODE_SEARCH` interception feasibility on GM AAOS (may require accessibility service or input method)
 
 ### M10: Polish
-- [ ] Diagnostics screen
-- [ ] Error recovery (reconnect, codec reset)
-- [ ] Display modes (fullscreen, system bars)
-- [ ] Overlay buttons (settings, stats)
+- [x] Diagnostics screen
+- [x] Error recovery (reconnect, codec reset)
+- [x] Display modes (fullscreen, system bars) — pulled forward, implemented with M2
+- [x] Overlay buttons (settings, stats) — pulled forward, draggable floating buttons
+- [x] App icon and logo — adaptive icon from brand asset
+- [x] Stats for nerds overlay — monospace panel with session/video stats
 
 ---
 
@@ -191,4 +228,4 @@ If Copilot starts losing context or producing lower quality output mid-milestone
 - **SoC:** Qualcomm Snapdragon (2024 Chevrolet Blazer EV)
 - **Display:** 2914×1134 physical, ~2628×800 usable (nav bar hidden)
 - **HW Decoders:** H.264 (`c2.qti.avc.decoder`), H.265, VP9 — all 8K@480fps max
-- **Network:** USB Ethernet NIC (car USB port), 100Mbps
+- **Network:** USB Ethernet NIC (car USB port), 100Mbps (validate this as it might be gigabit). iIt is always assigned 192.168.222.108 by GM's AAOS.

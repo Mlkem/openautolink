@@ -1,0 +1,109 @@
+package com.openautolink.app.navigation
+
+import com.openautolink.app.transport.ControlMessage
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+class NavigationDisplayImplTest {
+
+    @Test
+    fun `initial state is null`() {
+        val display = NavigationDisplayImpl()
+        assertNull(display.currentManeuver.value)
+    }
+
+    @Test
+    fun `onNavState updates current maneuver`() {
+        val display = NavigationDisplayImpl()
+
+        display.onNavState(
+            ControlMessage.NavState(
+                maneuver = "turn_right",
+                distanceMeters = 150,
+                road = "Main St",
+                etaSeconds = 420
+            )
+        )
+
+        val state = display.currentManeuver.value
+        assertNotNull(state)
+        assertEquals(ManeuverType.TURN_RIGHT, state!!.type)
+        assertEquals(150, state.distanceMeters)
+        assertEquals("Main St", state.roadName)
+        assertEquals(420, state.etaSeconds)
+        assert(state.formattedDistance.isNotEmpty()) { "Distance should be formatted" }
+    }
+
+    @Test
+    fun `onNavState with null maneuver maps to UNKNOWN`() {
+        val display = NavigationDisplayImpl()
+
+        display.onNavState(
+            ControlMessage.NavState(
+                maneuver = null,
+                distanceMeters = 100,
+                road = "Oak Ave",
+                etaSeconds = null
+            )
+        )
+
+        val state = display.currentManeuver.value
+        assertNotNull(state)
+        assertEquals(ManeuverType.UNKNOWN, state!!.type)
+        assertEquals("Oak Ave", state.roadName)
+    }
+
+    @Test
+    fun `onNavState with all null fields`() {
+        val display = NavigationDisplayImpl()
+
+        display.onNavState(
+            ControlMessage.NavState(
+                maneuver = null,
+                distanceMeters = null,
+                road = null,
+                etaSeconds = null
+            )
+        )
+
+        val state = display.currentManeuver.value
+        assertNotNull(state)
+        assertEquals(ManeuverType.UNKNOWN, state!!.type)
+        assertNull(state.distanceMeters)
+        assertNull(state.roadName)
+        assertEquals("", state.formattedDistance)
+    }
+
+    @Test
+    fun `clear removes maneuver state`() {
+        val display = NavigationDisplayImpl()
+
+        display.onNavState(
+            ControlMessage.NavState("turn_left", 200, "Elm St", 60)
+        )
+        assertNotNull(display.currentManeuver.value)
+
+        display.clear()
+        assertNull(display.currentManeuver.value)
+    }
+
+    @Test
+    fun `onNavState updates replace previous state`() {
+        val display = NavigationDisplayImpl()
+
+        display.onNavState(
+            ControlMessage.NavState("turn_left", 500, "First St", 120)
+        )
+        assertEquals(ManeuverType.TURN_LEFT, display.currentManeuver.value!!.type)
+
+        display.onNavState(
+            ControlMessage.NavState("turn_right", 100, "Second St", 30)
+        )
+        val state = display.currentManeuver.value
+        assertEquals(ManeuverType.TURN_RIGHT, state!!.type)
+        assertEquals(100, state.distanceMeters)
+        assertEquals("Second St", state.roadName)
+    }
+}

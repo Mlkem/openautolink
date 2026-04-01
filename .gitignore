@@ -37,3 +37,6 @@ desktop.ini
 *.keystore
 *.jks
 secrets/
+
+# Legacy app reference (not part of build)
+app_v1/

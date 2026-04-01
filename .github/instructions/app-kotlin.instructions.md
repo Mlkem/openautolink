@@ -4,6 +4,18 @@ applyTo: "app/**/*.kt"
 ---
 # App Kotlin Conventions
 
+## Bridge Cross-Reference Rule (CRITICAL)
+When implementing or modifying any app code that communicates with the bridge (transport, video, audio, input, session):
+1. **Always read the corresponding bridge source code** in `bridge/openautolink/headless/` before writing app code. Verify what the bridge actually sends/receives — don't rely solely on protocol docs, which may describe the target design rather than the current implementation.
+2. **Check for protocol mismatches.** The bridge may still use CPC200 framing while docs describe OAL. The app must match what the bridge actually outputs, OR the bridge must be updated first.
+3. **It is OK to modify the bridge C++ code** if it improves the protocol, simplifies the app, or fixes bugs. The bridge was written for the old CPC200 app and has room for rewrites. However, check `docs/work-plan.md` "Bridge Protocol Migration" section first — there may be a planned migration path that should be followed rather than ad-hoc changes.
+4. **Key bridge files to reference:**
+   - `bridge/openautolink/headless/include/openautolink/cpc200.hpp` — current wire format
+   - `bridge/openautolink/headless/include/openautolink/tcp_car_transport.hpp` — TCP transport
+   - `bridge/openautolink/headless/src/cpc_session.cpp` — video/audio frame building
+   - `bridge/openautolink/headless/src/live_session.cpp` — aasdk handler, keyframe detection
+   - `bridge/openautolink/headless/include/openautolink/headless_config.hpp` — config/ports
+
 ## Architecture
 - **MVVM** with StateFlow — ViewModels expose `StateFlow<UiState>`, composables collect
 - **Repository pattern** — interfaces in domain layer, implementations in data layer
