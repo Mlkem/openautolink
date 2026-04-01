@@ -1,11 +1,16 @@
 # OpenAutoLink
 
-Wireless Android Auto for aftermarket AAOS head units — no adapter hardware needed.
+Wireless Android Auto for AAOS head units — no adapter hardware needed.
 
-An SBC (Raspberry Pi CM5, etc.) bridges your phone's Android Auto session to your car's display over WiFi + Ethernet. The car runs the OpenAutoLink app, the SBC runs the bridge.
+An SBC (Raspberry Pi CM5, Khadas VIM4, etc.) bridges your phone's Android Auto session to your car's display over WiFi + Ethernet. The car runs the OpenAutoLink app, the SBC runs the bridge.
 
 ```
-Phone ──WiFi──▶ SBC Bridge ──Ethernet──▶ Car Head Unit App
+Phone ──WiFi TCP:5277──▶ SBC Bridge ──Ethernet──▶ Car Head Unit App (AAOS)
+         BT pairing          │                      Renders video/audio
+         WiFi creds           │                      Forwards touch/GNSS
+                              ├── Control :5288 (JSON lines)
+                              ├── Video   :5290 (binary frames)
+                              └── Audio   :5289 (binary frames)
 ```
 
 ## Components
@@ -13,14 +18,21 @@ Phone ──WiFi──▶ SBC Bridge ──Ethernet──▶ Car Head Unit App
 | Component | Language | Location |
 |-----------|----------|----------|
 | **Car App** | Kotlin/Compose (AAOS) | `app/` |
-| **Bridge** | C++20 + Python | `bridge/` |
-| **aasdk** | C++ (forked) | `external/opencardev-aasdk/` |
+| **Bridge** | C++20 (headless binary) | `bridge/openautolink/headless/` |
+| **BT/WiFi Services** | Python | `bridge/openautolink/scripts/` |
+| **SBC Deployment** | Bash/systemd | `bridge/sbc/` |
+| **aasdk** | C++ (submodule) | `external/opencardev-aasdk/` |
 
 ## Quick Start
 
 ### Build the App
 ```powershell
 .\gradlew :app:assembleDebug
+```
+
+### Build a Signed AAB (for Play Console)
+```powershell
+.\scripts\bundle-release-interactive.ps1
 ```
 
 ### Build the Bridge (on SBC)
@@ -36,16 +48,19 @@ cmake --build . --target openautolink-headless -j$(nproc)
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) — component islands, milestone plan
-- [Wire Protocol](docs/protocol.md) — OAL protocol spec (control + video + audio)
-- [Embedded Knowledge](docs/embedded-knowledge.md) — hardware lessons from real-car testing
-- [Networking](docs/networking.md) — three-network architecture
-- [Local Testing](docs/testing.md) — emulator + SBC testing setup
-- [Bridge Build Guide](bridge/sbc/BUILD.md) — SBC deployment
+| Doc | Purpose |
+|-----|---------|
+| [Architecture](docs/architecture.md) | Component islands, milestone plan |
+| [Wire Protocol](docs/protocol.md) | OAL protocol spec (control + video + audio) |
+| [Embedded Knowledge](docs/embedded-knowledge.md) | Hardware lessons from real-car testing |
+| [Networking](docs/networking.md) | Three-network architecture (phone, car, SSH) |
+| [Local Testing](docs/testing.md) | Emulator + SBC setup, in-car testing workflow |
+| [Work Plan](docs/work-plan.md) | Milestones and task tracking |
+| [Bridge Build Guide](bridge/sbc/BUILD.md) | SBC build and deployment |
 
 ## Status
 
-**Starting fresh.** This repo replaces the CPC200-based `carlink_native` app with a purpose-built bridge-only architecture. The bridge C++ code carries forward (it was already TCP-native). The app is being rewritten from scratch.
+Active development. See the [work plan](docs/work-plan.md) for current milestones.
 
 ## License
 
