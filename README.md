@@ -4,7 +4,16 @@
 
 # OpenAutoLink
 
-**An open-source wireless Android Auto bridge for AAOS head units.** An SBC handles the phone's Android Auto session over WiFi, then streams video, audio, and touch to an app on your car's display over Ethernet — no USB adapter hardware required.
+**An open-source wireless Android Auto bridge for AAOS head units.** An SBC handles the phone's Android Auto session over WiFi, then streams video, audio, and touch to an app on your car's display over Ethernet — no janky, closed-source and hacky USB adapter hardware required.
+
+- Wireless Android Auto — phone connects via Bluetooth + WiFi, no cables to the phone
+- Up to 1080p60 video with H.264, H.265, or VP9 codec support
+- Full audio: media, navigation prompts, phone calls, voice assistant
+- Touch, steering wheel controls, and microphone input forwarded to the phone
+- Vehicle data (speed, gear, fuel/EV range, GPS, etc.) sent to Android Auto
+- Navigation turn-by-turn displayed on the instrument cluster
+- One-command SBC install, auto-reconnect on car startup, OTA app updates
+- Fully open-source — app, bridge, protocol, and deployment scripts
 
 > **Fair warning:** This is a free, hobby project that is very much under active development. It might work great, it might not work at all. My goal is to eventually make it stable and production-quality, but it's not there yet — and honestly, it may never be. I'm building this because it's fun and because I want Android Auto back in my car. If that sounds like your kind of adventure, give it a try.
 
