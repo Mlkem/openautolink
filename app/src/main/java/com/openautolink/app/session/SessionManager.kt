@@ -10,6 +10,10 @@ import com.openautolink.app.audio.AudioStats
 import com.openautolink.app.audio.CallState
 import com.openautolink.app.audio.MicCaptureManager
 import com.openautolink.app.cluster.ClusterNavigationState
+import com.openautolink.app.diagnostics.DiagnosticLevel
+import com.openautolink.app.diagnostics.RemoteDiagnostics
+import com.openautolink.app.diagnostics.RemoteDiagnosticsImpl
+import com.openautolink.app.diagnostics.TelemetryCollector
 import com.openautolink.app.input.GnssForwarder
 import com.openautolink.app.input.GnssForwarderImpl
 import com.openautolink.app.input.VehicleDataForwarder
@@ -24,6 +28,7 @@ import com.openautolink.app.transport.BridgeConnection
 import com.openautolink.app.transport.ConnectionManager
 import com.openautolink.app.transport.ConnectionState
 import com.openautolink.app.transport.ControlMessage
+import com.openautolink.app.transport.ControlMessageSerializer
 import com.openautolink.app.video.DecoderState
 import com.openautolink.app.video.MediaCodecDecoder
 import com.openautolink.app.video.VideoDecoder
@@ -98,6 +103,11 @@ class SessionManager(
     private val _navigationDisplay: NavigationDisplay = NavigationDisplayImpl()
     val navigationDisplay: NavigationDisplay get() = _navigationDisplay
 
+    // Remote diagnostics — sends structured logs + telemetry to bridge
+    private var _remoteDiagnostics: RemoteDiagnosticsImpl? = null
+    val remoteDiagnostics: RemoteDiagnostics? get() = _remoteDiagnostics
+    private var _telemetryCollector: TelemetryCollector? = null
+
     val currentManeuver: StateFlow<ManeuverState?>
         get() = _navigationDisplay.currentManeuver
 
@@ -114,7 +124,8 @@ class SessionManager(
     private var callStateJob: Job? = null
     private var targetHost: String? = null
 
-    fun start(host: String, port: Int = 5288, codecPreference: String = "h264", micSourcePreference: String = "car") {
+    fun start(host: String, port: Int = 5288, codecPreference: String = "h264", micSourcePreference: String = "car",
+               diagnosticsEnabled: Boolean = false, diagnosticsMinLevel: String = "INFO") {
         targetHost = host
         micSource = micSourcePreference
         observeJob?.cancel()
@@ -162,6 +173,19 @@ class SessionManager(
         _clusterManager?.setClusterEnabled(true)
         _clusterManager?.launchClusterBinding()
 
+        // Create remote diagnostics
+        _telemetryCollector?.stop()
+        _remoteDiagnostics = RemoteDiagnosticsImpl { message ->
+            scope.launch { connectionManager.sendControlMessage(message) }
+        }
+        _remoteDiagnostics?.setEnabled(diagnosticsEnabled)
+        _remoteDiagnostics?.setMinLevel(DiagnosticLevel.fromWire(diagnosticsMinLevel))
+        com.openautolink.app.diagnostics.DiagnosticLog.instance = _remoteDiagnostics
+        _telemetryCollector = TelemetryCollector(scope, _remoteDiagnostics!!, _sessionState)
+        _telemetryCollector?.videoDecoder = _videoDecoder
+        _telemetryCollector?.audioPlayer = _audioPlayer
+        _telemetryCollector?.start()
+
         observeJob = scope.launch {
             // Observe connection state changes
             launch {
@@ -178,10 +202,12 @@ class SessionManager(
                         SessionState.ERROR -> "Error"
                     }
                     Log.i(TAG, "Session state: $newState")
+                    _remoteDiagnostics?.log(DiagnosticLevel.INFO, "transport", "Session state: $newState")
 
                     // Auto-reconnect video/audio if they dropped but phone is still connected
                     if (newState == SessionState.PHONE_CONNECTED && previousState == SessionState.STREAMING) {
                         Log.w(TAG, "Video/audio channel lost — reconnecting")
+                        _remoteDiagnostics?.log(DiagnosticLevel.WARN, "transport", "Video/audio channel lost — reconnecting")
                         _statusMessage.value = "Reconnecting video/audio..."
                         val info = _bridgeInfo.value
                         val host = targetHost
@@ -252,6 +278,10 @@ class SessionManager(
         _mediaSessionManager = null
         _clusterManager?.release()
         _clusterManager = null
+        _telemetryCollector?.stop()
+        _telemetryCollector = null
+        com.openautolink.app.diagnostics.DiagnosticLog.instance = null
+        _remoteDiagnostics = null
         _sessionState.value = SessionState.IDLE
         _statusMessage.value = "Disconnected"
         _bridgeInfo.value = null
@@ -279,6 +309,16 @@ class SessionManager(
         connectionManager.sendControlMessage(message)
     }
 
+    /** Update remote diagnostics enabled state at runtime. */
+    fun setDiagnosticsEnabled(enabled: Boolean) {
+        _remoteDiagnostics?.setEnabled(enabled)
+    }
+
+    /** Update remote diagnostics minimum log level at runtime. */
+    fun setDiagnosticsMinLevel(level: String) {
+        _remoteDiagnostics?.setMinLevel(DiagnosticLevel.fromWire(level))
+    }
+
     /**
      * Watches decoder state for ERROR — automatically resets codec and requests a keyframe.
      * Waits 500ms before recovery to avoid tight loops on persistent errors.
@@ -291,6 +331,7 @@ class SessionManager(
         _videoDecoder?.decoderState?.collect { state ->
             if (state == DecoderState.ERROR) {
                 Log.w(TAG, "Decoder error detected — initiating recovery")
+                _remoteDiagnostics?.log(DiagnosticLevel.ERROR, "video", "Decoder error detected — initiating recovery")
                 _statusMessage.value = "Video error — recovering..."
                 recoverDecoder()
             }
@@ -320,6 +361,7 @@ class SessionManager(
             }
             _micCaptureManager?.setMicPurpose(purpose)
             Log.d(TAG, "Call state changed to $state — mic purpose set to $purpose")
+            _remoteDiagnostics?.log(DiagnosticLevel.DEBUG, "audio", "Call state changed to $state — mic purpose set to $purpose")
         }
     }
 
@@ -334,12 +376,18 @@ class SessionManager(
                     audioPort = message.audioPort
                 )
                 _bridgeInfo.value = info
+                // Send system info once on connect
+                _remoteDiagnostics?.log(DiagnosticLevel.INFO, "system",
+                    "Android ${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT}), " +
+                    "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}, " +
+                    "SoC: ${android.os.Build.SOC_MANUFACTURER} ${android.os.Build.SOC_MODEL}")
                 // Send our hello back
                 scope.launch {
                     sendAppHello(displayWidth = 0, displayHeight = 0, displayDpi = 0)
                 }
             }
             is ControlMessage.PhoneConnected -> {
+                _remoteDiagnostics?.log(DiagnosticLevel.INFO, "session", "Phone connected: ${message.phoneName}")
                 // Phone connected — open video and audio channels
                 val info = _bridgeInfo.value ?: return
                 val host = targetHost ?: return
@@ -350,6 +398,7 @@ class SessionManager(
                 _vehicleDataForwarder?.start()
             }
             is ControlMessage.PhoneDisconnected -> {
+                _remoteDiagnostics?.log(DiagnosticLevel.INFO, "session", "Phone disconnected: ${message.reason}")
                 // Phone left — stop video and audio
                 stopVideoChannel()
                 stopAudioChannel()
@@ -381,9 +430,11 @@ class SessionManager(
                 }
             }
             is ControlMessage.AudioStart -> {
+                _remoteDiagnostics?.log(DiagnosticLevel.INFO, "audio", "Audio start: purpose=${message.purpose}, rate=${message.sampleRate}, ch=${message.channels}")
                 _audioPlayer?.startPurpose(message.purpose, message.sampleRate, message.channels)
             }
             is ControlMessage.AudioStop -> {
+                _remoteDiagnostics?.log(DiagnosticLevel.INFO, "audio", "Audio stop: purpose=${message.purpose}")
                 _audioPlayer?.stopPurpose(message.purpose)
             }
             is ControlMessage.MicStart -> {
@@ -398,6 +449,7 @@ class SessionManager(
             }
             is ControlMessage.Error -> {
                 Log.e(TAG, "Bridge error ${message.code}: ${message.message}")
+                _remoteDiagnostics?.log(DiagnosticLevel.ERROR, "transport", "Bridge error ${message.code}: ${message.message}")
                 _statusMessage.value = "Error: ${message.message}"
             }
             else -> {} // Other messages handled by island-specific collectors

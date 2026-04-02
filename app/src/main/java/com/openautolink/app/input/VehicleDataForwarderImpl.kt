@@ -2,6 +2,7 @@ package com.openautolink.app.input
 
 import android.content.Context
 import android.util.Log
+import com.openautolink.app.diagnostics.DiagnosticLog
 import com.openautolink.app.transport.ControlMessage
 import java.util.concurrent.ConcurrentHashMap
 
@@ -67,6 +68,7 @@ class VehicleDataForwarderImpl(
             Log.i(TAG, "Vehicle data forwarding started")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to start vehicle data forwarding: ${e.message}")
+            DiagnosticLog.w("vhal", "Failed to start vehicle data forwarding: ${e.message}")
             cleanup()
         }
     }
@@ -134,12 +136,14 @@ class VehicleDataForwarderImpl(
                 val available = isAvailableMethod?.invoke(pm, propId, 0) as? Boolean ?: true
                 if (!available) {
                     Log.d(TAG, "Property $propId not available, skipping")
+                    DiagnosticLog.i("vhal", "Property $propId not available, skipping")
                     continue
                 }
 
                 registerPropertyCallback(pm, propId)
             } catch (e: Exception) {
                 Log.d(TAG, "Cannot register property $propId: ${e.message}")
+                DiagnosticLog.w("vhal", "Cannot register property $propId: ${e.message}")
             }
         }
     }

@@ -3,6 +3,7 @@ package com.openautolink.app.data
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -38,6 +39,8 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
         val SELF_UPDATE_ENABLED = stringPreferencesKey("self_update_enabled")
         val UPDATE_MANIFEST_URL = stringPreferencesKey("update_manifest_url")
         val NETWORK_INTERFACE = stringPreferencesKey("network_interface")
+        val REMOTE_DIAGNOSTICS_ENABLED = booleanPreferencesKey("remote_diagnostics_enabled")
+        val REMOTE_DIAGNOSTICS_MIN_LEVEL = stringPreferencesKey("remote_diagnostics_min_level")
 
         const val DEFAULT_BRIDGE_HOST = "192.168.0.100"
         const val DEFAULT_BRIDGE_PORT = 5288
@@ -48,6 +51,8 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
         const val DEFAULT_SELF_UPDATE_ENABLED = "off"
         const val DEFAULT_UPDATE_MANIFEST_URL = "https://mossyhub.github.io/openautolink/update.json"
         const val DEFAULT_NETWORK_INTERFACE = "" // empty = auto-select first available
+        const val DEFAULT_REMOTE_DIAGNOSTICS_ENABLED = false
+        const val DEFAULT_REMOTE_DIAGNOSTICS_MIN_LEVEL = "INFO"
     }
 
     val bridgeHost: Flow<String> = dataStore.data.map { prefs ->
@@ -86,6 +91,14 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
         prefs[NETWORK_INTERFACE] ?: DEFAULT_NETWORK_INTERFACE
     }
 
+    val remoteDiagnosticsEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[REMOTE_DIAGNOSTICS_ENABLED] ?: DEFAULT_REMOTE_DIAGNOSTICS_ENABLED
+    }
+
+    val remoteDiagnosticsMinLevel: Flow<String> = dataStore.data.map { prefs ->
+        prefs[REMOTE_DIAGNOSTICS_MIN_LEVEL] ?: DEFAULT_REMOTE_DIAGNOSTICS_MIN_LEVEL
+    }
+
     suspend fun setBridgeHost(host: String) {
         dataStore.edit { it[BRIDGE_HOST] = host }
     }
@@ -120,5 +133,13 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
 
     suspend fun setNetworkInterface(interfaceName: String) {
         dataStore.edit { it[NETWORK_INTERFACE] = interfaceName }
+    }
+
+    suspend fun setRemoteDiagnosticsEnabled(enabled: Boolean) {
+        dataStore.edit { it[REMOTE_DIAGNOSTICS_ENABLED] = enabled }
+    }
+
+    suspend fun setRemoteDiagnosticsMinLevel(level: String) {
+        dataStore.edit { it[REMOTE_DIAGNOSTICS_MIN_LEVEL] = level }
     }
 }

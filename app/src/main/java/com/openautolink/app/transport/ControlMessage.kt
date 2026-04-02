@@ -112,6 +112,22 @@ sealed class ControlMessage {
 
     data class ConfigUpdate(val config: Map<String, String>) : ControlMessage()
     object KeyframeRequest : ControlMessage()
+
+    // App → Bridge: diagnostic messages
+    data class AppLog(
+        val ts: Long,
+        val level: String,
+        val tag: String,
+        val msg: String
+    ) : ControlMessage()
+
+    data class AppTelemetry(
+        val ts: Long,
+        val video: com.openautolink.app.diagnostics.VideoTelemetry? = null,
+        val audio: com.openautolink.app.diagnostics.AudioTelemetry? = null,
+        val session: com.openautolink.app.diagnostics.SessionTelemetry? = null,
+        val cluster: com.openautolink.app.diagnostics.ClusterTelemetry? = null
+    ) : ControlMessage()
 }
 
 enum class AudioPurpose {

@@ -182,6 +182,49 @@ object ControlMessageSerializer {
                 put("type", "keyframe_request")
             }
 
+            is ControlMessage.AppLog -> buildJsonObject {
+                put("type", "app_log")
+                put("ts", message.ts)
+                put("level", message.level)
+                put("tag", message.tag)
+                put("msg", message.msg)
+            }
+
+            is ControlMessage.AppTelemetry -> buildJsonObject {
+                put("type", "app_telemetry")
+                put("ts", message.ts)
+                message.video?.let { v ->
+                    put("video", buildJsonObject {
+                        put("fps", v.fps)
+                        put("decoded", v.decoded)
+                        put("dropped", v.dropped)
+                        put("codec", v.codec)
+                        put("width", v.width)
+                        put("height", v.height)
+                    })
+                }
+                message.audio?.let { a ->
+                    put("audio", buildJsonObject {
+                        putJsonArray("active") { a.active.forEach { add(JsonPrimitive(it)) } }
+                        put("underruns", buildJsonObject { a.underruns.forEach { (k, v) -> put(k, v) } })
+                        put("frames_written", buildJsonObject { a.framesWritten.forEach { (k, v) -> put(k, v) } })
+                    })
+                }
+                message.session?.let { s ->
+                    put("session", buildJsonObject {
+                        put("state", s.state)
+                        put("uptime_ms", s.uptimeMs)
+                    })
+                }
+                message.cluster?.let { c ->
+                    put("cluster", buildJsonObject {
+                        put("bound", c.bound)
+                        put("alive", c.alive)
+                        put("rebinds", c.rebinds)
+                    })
+                }
+            }
+
             // Bridge→App messages shouldn't be serialized by the app, but handle gracefully
             else -> return "{}"
         }

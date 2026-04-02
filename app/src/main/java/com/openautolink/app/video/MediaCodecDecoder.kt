@@ -4,6 +4,7 @@ import android.media.MediaCodec
 import android.media.MediaFormat
 import android.util.Log
 import android.view.Surface
+import com.openautolink.app.diagnostics.DiagnosticLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -58,6 +59,8 @@ class MediaCodecDecoder(private val codecPreference: String = "h264") : VideoDec
     private var lastStatsTime = 0L
     private var lastStatsFrames = 0L
     @Volatile private var currentFps = 0f
+    @Volatile private var firstFrameRendered = false
+    @Volatile private var decodeStartTimeMs = 0L
 
     @Volatile private var _needsKeyframe = false
 
@@ -119,6 +122,7 @@ class MediaCodecDecoder(private val codecPreference: String = "h264") : VideoDec
 
     private fun handleCodecConfig(frame: VideoFrame) {
         Log.i(TAG, "Codec config received: ${frame.data.size} bytes")
+        DiagnosticLog.i("video", "Codec config received: ${frame.data.size} bytes")
         codecConfigData = frame.data.copyOf()
         receivedIdr = false
         _needsKeyframe = false
@@ -165,6 +169,7 @@ class MediaCodecDecoder(private val codecPreference: String = "h264") : VideoDec
             val decoderName = CodecSelector.findDecoder(mimeType)
             if (decoderName == null) {
                 Log.e(TAG, "No decoder available for $mimeType")
+                DiagnosticLog.e("video", "No decoder available for $mimeType")
                 _decoderState.value = DecoderState.ERROR
                 return
             }
@@ -176,6 +181,8 @@ class MediaCodecDecoder(private val codecPreference: String = "h264") : VideoDec
             mc.configure(format, surface, null, 0)
             mc.start()
             codec = mc
+            firstFrameRendered = false
+            decodeStartTimeMs = System.currentTimeMillis()
 
             // Start output drain thread
             startDrainThread(mc)
@@ -183,8 +190,10 @@ class MediaCodecDecoder(private val codecPreference: String = "h264") : VideoDec
             _decoderState.value = DecoderState.DECODING
             updateStats(decoderName)
             Log.i(TAG, "Codec configured: $decoderName ($mimeType)")
+            DiagnosticLog.i("video", "Codec selected: $decoderName ($mimeType)")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to configure codec", e)
+            DiagnosticLog.e("video", "Failed to configure codec: ${e.message}")
             _decoderState.value = DecoderState.ERROR
         }
     }
@@ -218,6 +227,7 @@ class MediaCodecDecoder(private val codecPreference: String = "h264") : VideoDec
             mc.queueInputBuffer(inputIndex, 0, frame.data.size, frame.ptsMs * 1000, flags)
         } catch (e: MediaCodec.CodecException) {
             Log.e(TAG, "Codec error queuing frame", e)
+            DiagnosticLog.e("video", "Codec error queuing frame: ${e.message}, recoverable=${e.isRecoverable}")
             if (!e.isRecoverable) {
                 _decoderState.value = DecoderState.ERROR
                 _needsKeyframe = true
@@ -242,6 +252,11 @@ class MediaCodecDecoder(private val codecPreference: String = "h264") : VideoDec
                             // Render to surface — this is live UI state, render immediately
                             mc.releaseOutputBuffer(outputIndex, true)
                             val decoded = framesDecoded.incrementAndGet()
+                            if (!firstFrameRendered) {
+                                firstFrameRendered = true
+                                val elapsed = System.currentTimeMillis() - decodeStartTimeMs
+                                DiagnosticLog.i("video", "First frame rendered in ${elapsed}ms")
+                            }
                             updateFps(decoded)
                         }
                         outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
@@ -257,6 +272,7 @@ class MediaCodecDecoder(private val codecPreference: String = "h264") : VideoDec
                     }
                 } catch (e: MediaCodec.CodecException) {
                     Log.e(TAG, "Codec error in drain loop", e)
+                    DiagnosticLog.e("video", "Codec error in drain loop: ${e.message}")
                     _decoderState.value = DecoderState.ERROR
                     _needsKeyframe = true
                     break

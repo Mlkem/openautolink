@@ -2,6 +2,7 @@ package com.openautolink.app.cluster
 
 import android.content.Intent
 import android.util.Log
+import com.openautolink.app.diagnostics.DiagnosticLog
 import androidx.car.app.CarContext
 import androidx.car.app.Screen
 import androidx.car.app.Session
@@ -70,6 +71,7 @@ class ClusterMainSession : Session() {
         if (isPrimary) {
             primarySession = this
             Log.i(TAG, "Primary session created — owns NavigationManager")
+            DiagnosticLog.i("cluster", "ClusterMainSession created (primary)")
         } else {
             Log.i(TAG, "Secondary session created — passive")
             return RelayScreen(carContext)
@@ -115,6 +117,7 @@ class ClusterMainSession : Session() {
                 if (isPrimary) {
                     primarySession = null
                     Log.i(TAG, "Primary session destroyed")
+                    DiagnosticLog.i("cluster", "ClusterMainSession destroyed")
                     arrivalTimeoutJob?.cancel()
                     if (isNavigating) {
                         try {

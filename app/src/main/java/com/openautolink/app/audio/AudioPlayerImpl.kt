@@ -2,6 +2,7 @@ package com.openautolink.app.audio
 
 import android.media.AudioManager
 import android.util.Log
+import com.openautolink.app.diagnostics.DiagnosticLog
 import com.openautolink.app.transport.AudioPurpose
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -75,6 +76,7 @@ class AudioPlayerImpl(private val audioManager: AudioManager) : AudioPlayer {
 
         initialized = true
         Log.i(TAG, "Audio player initialized with ${slots.size} purpose slots")
+        DiagnosticLog.i("audio", "AudioPlayer initialized with ${slots.size} purpose slots")
         updateStats()
     }
 
@@ -100,6 +102,7 @@ class AudioPlayerImpl(private val audioManager: AudioManager) : AudioPlayer {
         val slot = slots[frame.purpose]
         if (slot == null) {
             Log.w(TAG, "No slot for purpose ${frame.purpose}")
+            DiagnosticLog.w("audio", "No slot for purpose ${frame.purpose}")
             return
         }
 
@@ -131,6 +134,7 @@ class AudioPlayerImpl(private val audioManager: AudioManager) : AudioPlayer {
         applyVolumeActions(actions)
 
         Log.i(TAG, "Started $purpose: ${sampleRate}Hz ${channels}ch (call=${coordinator.callState.value})")
+        DiagnosticLog.i("audio", "AudioTrack started: purpose=$purpose, rate=${sampleRate}, ch=$channels")
         updateStats()
     }
 
@@ -143,6 +147,7 @@ class AudioPlayerImpl(private val audioManager: AudioManager) : AudioPlayer {
         applyVolumeActions(actions)
 
         Log.i(TAG, "Stopped $purpose (call=${coordinator.callState.value})")
+        DiagnosticLog.i("audio", "AudioTrack stopped: purpose=$purpose")
         updateStats()
     }
 
@@ -207,6 +212,16 @@ class AudioPlayerImpl(private val audioManager: AudioManager) : AudioPlayer {
         val active = slots.filter { it.value.isActive }.keys
         val underruns = slots.mapValues { it.value.underrunCount.get() }
             .filter { it.value > 0 }
+
+        // Log new underruns since last stats update
+        val prevUnderruns = _stats.value.underruns
+        for ((purpose, count) in underruns) {
+            val prev = prevUnderruns[purpose] ?: 0L
+            if (count > prev) {
+                DiagnosticLog.w("audio", "Underrun on $purpose: $count total (+${count - prev})")
+            }
+        }
+
         val written = slots.mapValues { it.value.framesWritten.get() }
             .filter { it.value > 0 }
 

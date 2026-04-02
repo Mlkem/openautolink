@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.util.Log
+import com.openautolink.app.diagnostics.DiagnosticLog
 import java.io.File
 
 /**
@@ -59,10 +60,12 @@ class AppInstaller(private val context: Context) {
             // Commit — this triggers the system install prompt
             session.commit(pendingIntent.intentSender)
             Log.i(TAG, "Install session $sessionId committed")
+            DiagnosticLog.i("update", "Install session $sessionId committed")
 
             InstallResult.SessionCreated
         } catch (e: SecurityException) {
             Log.e(TAG, "Install blocked by system policy", e)
+            DiagnosticLog.e("update", "Install blocked by system policy: ${e.message}")
             InstallResult.Error(
                 "Installation not permitted on this device. " +
                     "AAOS may block app installation from non-system sources."
@@ -77,7 +80,9 @@ class AppInstaller(private val context: Context) {
      * Check if this device allows installing packages from this app.
      */
     fun canInstallPackages(): Boolean {
-        return context.packageManager.canRequestPackageInstalls()
+        val result = context.packageManager.canRequestPackageInstalls()
+        DiagnosticLog.i("update", "canRequestPackageInstalls=$result")
+        return result
     }
 
     companion object {

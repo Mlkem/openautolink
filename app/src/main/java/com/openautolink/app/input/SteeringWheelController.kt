@@ -3,6 +3,7 @@ package com.openautolink.app.input
 import android.media.AudioManager
 import android.util.Log
 import android.view.KeyEvent
+import com.openautolink.app.diagnostics.DiagnosticLog
 import com.openautolink.app.transport.ControlMessage
 
 /**
@@ -72,7 +73,10 @@ class SteeringWheelController(
                 handleVolume(keycode, isDown)
                 true
             }
-            else -> false
+            else -> {
+                DiagnosticLog.d("input", "KeyEvent not handled: keycode=$keycode")
+                false
+            }
         }
     }
 
@@ -87,6 +91,7 @@ class SteeringWheelController(
             )
         )
         Log.d(TAG, "button → bridge: keycode=$aaKeycode down=$down longpress=$longpress")
+        DiagnosticLog.d("input", "KeyEvent intercepted: keycode=$aaKeycode down=$down longpress=$longpress")
     }
 
     private fun handleVolume(keycode: Int, isDown: Boolean) {

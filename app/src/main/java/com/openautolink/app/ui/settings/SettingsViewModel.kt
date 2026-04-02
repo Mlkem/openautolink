@@ -29,6 +29,8 @@ data class SettingsUiState(
     val selfUpdateEnabled: String = AppPreferences.DEFAULT_SELF_UPDATE_ENABLED,
     val updateManifestUrl: String = AppPreferences.DEFAULT_UPDATE_MANIFEST_URL,
     val networkInterface: String = AppPreferences.DEFAULT_NETWORK_INTERFACE,
+    val remoteDiagnosticsEnabled: Boolean = AppPreferences.DEFAULT_REMOTE_DIAGNOSTICS_ENABLED,
+    val remoteDiagnosticsMinLevel: String = AppPreferences.DEFAULT_REMOTE_DIAGNOSTICS_MIN_LEVEL,
 )
 
 sealed class UpdateStatus {
@@ -64,6 +66,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         preferences.selfUpdateEnabled,
         preferences.updateManifestUrl,
         preferences.networkInterface,
+        preferences.remoteDiagnosticsEnabled,
+        preferences.remoteDiagnosticsMinLevel,
     ) { values: Array<Any> ->
         SettingsUiState(
             bridgeHost = values[0] as String,
@@ -75,6 +79,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             selfUpdateEnabled = values[6] as String,
             updateManifestUrl = values[7] as String,
             networkInterface = values[8] as String,
+            remoteDiagnosticsEnabled = values[9] as Boolean,
+            remoteDiagnosticsMinLevel = values[10] as String,
         )
     }.stateIn(
         viewModelScope,
@@ -104,6 +110,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun updateMicSource(source: String) {
         viewModelScope.launch { preferences.setMicSource(source) }
+    }
+
+    fun updateRemoteDiagnosticsEnabled(enabled: Boolean) {
+        viewModelScope.launch { preferences.setRemoteDiagnosticsEnabled(enabled) }
+    }
+
+    fun updateRemoteDiagnosticsMinLevel(level: String) {
+        viewModelScope.launch { preferences.setRemoteDiagnosticsMinLevel(level) }
     }
 
     fun updateSelfUpdateEnabled(enabled: String) {

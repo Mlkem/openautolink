@@ -152,11 +152,7 @@ fun SettingsScreen(
                         NavigationRailItem(
                             selected = selectedTab == tab,
                             onClick = {
-                                if (tab == SettingsTab.DIAGNOSTICS) {
-                                    onNavigateToDiagnostics()
-                                } else {
-                                    selectedTab = tab
-                                }
+                                selectedTab = tab
                             },
                             icon = {
                                 Icon(
@@ -185,7 +181,9 @@ fun SettingsScreen(
                     SettingsTab.VIDEO -> VideoTab(uiState)
                     SettingsTab.AUDIO -> AudioTab(viewModel, uiState)
                     SettingsTab.UPDATES -> UpdatesTab(viewModel, uiState, updateStatus)
-                    SettingsTab.DIAGNOSTICS -> {} // Navigated away
+                    SettingsTab.DIAGNOSTICS -> DiagnosticsSettingsTab(
+                        viewModel, uiState, onNavigateToDiagnostics
+                    )
                 }
             }
         }
@@ -905,4 +903,130 @@ private fun SectionHeader(title: String) {
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier.padding(vertical = 8.dp)
     )
+}
+
+private val logLevelOptions = listOf("DEBUG", "INFO", "WARN", "ERROR")
+
+@Composable
+private fun DiagnosticsSettingsTab(
+    viewModel: SettingsViewModel,
+    uiState: SettingsUiState,
+    onNavigateToDiagnostics: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+    ) {
+        SectionHeader("Remote Diagnostics")
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = "Send structured logs and telemetry to the bridge over the control channel. " +
+                    "View in real time via SSH: journalctl -u openautolink.service -f | grep '[CAR]'",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 12.dp),
+        )
+
+        // Enable/disable toggle
+        Row(
+            modifier = Modifier
+                .fillMaxWidth(0.7f)
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Enable Remote Diagnostics",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = if (uiState.remoteDiagnosticsEnabled)
+                        "Logs and telemetry are being sent to the bridge"
+                    else
+                        "No diagnostic data is sent to the bridge",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = uiState.remoteDiagnosticsEnabled,
+                onCheckedChange = { enabled ->
+                    viewModel.updateRemoteDiagnosticsEnabled(enabled)
+                },
+                modifier = Modifier.testTag("remoteDiagnosticsToggle"),
+            )
+        }
+
+        // Log level selector — only visible when enabled
+        if (uiState.remoteDiagnosticsEnabled) {
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "Minimum Log Level",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "Only log events at or above this level are sent.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+
+            logLevelOptions.forEach { level ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth(0.5f)
+                        .clickable { viewModel.updateRemoteDiagnosticsMinLevel(level) }
+                        .padding(vertical = 6.dp)
+                        .testTag("logLevel_$level"),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(
+                        selected = uiState.remoteDiagnosticsMinLevel == level,
+                        onClick = { viewModel.updateRemoteDiagnosticsMinLevel(level) },
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = level,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (uiState.remoteDiagnosticsMinLevel == level)
+                            FontWeight.SemiBold else FontWeight.Normal,
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "Telemetry snapshots (video/audio/session/cluster stats) are sent every 5 seconds.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        HorizontalDivider()
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Link to full diagnostics screen
+        FilledTonalButton(
+            onClick = onNavigateToDiagnostics,
+            modifier = Modifier.testTag("openDiagnosticsButton"),
+        ) {
+            Icon(
+                imageVector = Icons.Default.BugReport,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Open Diagnostics Dashboard")
+        }
+    }
 }

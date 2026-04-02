@@ -2,6 +2,7 @@ package com.openautolink.app.transport
 
 import android.util.Log
 import com.openautolink.app.audio.AudioFrame
+import com.openautolink.app.diagnostics.DiagnosticLog
 import com.openautolink.app.video.VideoFrame
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -97,6 +98,7 @@ class ConnectionManager(private val scope: CoroutineScope) : BridgeConnection {
                     videoChannel.connect(host, port)
                 }
                 Log.i(TAG, "Video channel connected to $host:$port")
+                DiagnosticLog.i("transport", "Video channel connected to $host:$port")
                 _connectionState.value = ConnectionState.STREAMING
 
                 // Collect video frames and re-emit
@@ -107,6 +109,7 @@ class ConnectionManager(private val scope: CoroutineScope) : BridgeConnection {
                 throw e
             } catch (e: Exception) {
                 Log.w(TAG, "Video channel error: ${e.message}")
+                DiagnosticLog.w("transport", "Video channel error: ${e.message}")
             } finally {
                 videoChannel.close()
                 // Don't change state to DISCONNECTED — control channel may still be alive
@@ -132,6 +135,7 @@ class ConnectionManager(private val scope: CoroutineScope) : BridgeConnection {
                     audioChannel.connect(host, port)
                 }
                 Log.i(TAG, "Audio channel connected to $host:$port")
+                DiagnosticLog.i("transport", "Audio channel connected to $host:$port")
 
                 // Collect audio frames and re-emit
                 audioChannel.receiveFrames().collect { frame ->
@@ -141,6 +145,7 @@ class ConnectionManager(private val scope: CoroutineScope) : BridgeConnection {
                 throw e
             } catch (e: Exception) {
                 Log.w(TAG, "Audio channel error: ${e.message}")
+                DiagnosticLog.w("transport", "Audio channel error: ${e.message}")
             } finally {
                 audioChannel.close()
             }
@@ -176,6 +181,7 @@ class ConnectionManager(private val scope: CoroutineScope) : BridgeConnection {
                 }
 
                 Log.i(TAG, "Connected to bridge at $host:$targetPort")
+                DiagnosticLog.i("transport", "Connected to bridge at $host:$targetPort")
                 _connectionState.value = ConnectionState.CONNECTED
                 backoffMs = INITIAL_BACKOFF_MS // Reset backoff on success
 
@@ -184,10 +190,12 @@ class ConnectionManager(private val scope: CoroutineScope) : BridgeConnection {
 
                 // If we get here, connection was lost
                 Log.i(TAG, "Connection to bridge lost")
+                DiagnosticLog.w("transport", "Connection to bridge lost")
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.w(TAG, "Connection attempt failed: ${e.message}")
+                DiagnosticLog.w("transport", "Connection attempt failed: ${e.message}")
             }
 
             controlChannel.close()

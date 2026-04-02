@@ -388,6 +388,10 @@ void OalSession::on_app_json_line(const std::string& line) {
         handle_config_update(line);
     } else if (type == "keyframe_request") {
         handle_keyframe_request();
+    } else if (type == "app_log") {
+        handle_app_log(line);
+    } else if (type == "app_telemetry") {
+        handle_app_telemetry(line);
     } else {
         std::cerr << "[OAL] unknown message type: " << type << std::endl;
     }
@@ -624,6 +628,24 @@ void OalSession::handle_keyframe_request() {
         aa_session_->request_fresh_idr();
     }
 #endif
+}
+
+void OalSession::handle_app_log(const std::string& json) {
+    // Extract fields and format for journalctl output
+    std::string level = oal_json_extract_string(json, "level");
+    std::string tag   = oal_json_extract_string(json, "tag");
+    std::string msg   = oal_json_extract_string(json, "msg");
+
+    // Pad level to 5 chars for alignment
+    while (level.size() < 5) level += ' ';
+
+    std::cerr << "[CAR] " << level << " " << tag << "\t" << msg << std::endl;
+}
+
+void OalSession::handle_app_telemetry(const std::string& json) {
+    // Strip the "type" and "ts" wrappers — just forward the raw JSON content
+    // so the full telemetry snapshot is visible in the journal
+    std::cerr << "[CAR] TELEM " << json << std::endl;
 }
 
 } // namespace openautolink

@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.openautolink.app.diagnostics.DiagnosticLog
 
 /**
  * Manages the cluster service lifecycle: enabling/disabling the CarAppService component,
@@ -87,6 +88,7 @@ class ClusterManager(private val context: Context) {
             }
             context.startActivity(intent)
             Log.i(TAG, "Launched CarAppActivity for Templates Host binding")
+            DiagnosticLog.i("cluster", "Launched CarAppActivity for Templates Host binding")
 
             // Bring main activity back — binding is IPC-based, doesn't need foreground
             handler.postDelayed({
@@ -103,6 +105,7 @@ class ClusterManager(private val context: Context) {
         } catch (e: Exception) {
             // Cluster service blocked or not available — graceful degradation
             Log.w(TAG, "Failed to launch CarAppActivity: ${e.message}")
+            DiagnosticLog.w("cluster", "Failed to launch CarAppActivity: ${e.message}")
             Log.i(TAG, "Cluster navigation will not be available — media metadata still flows via MediaSession")
         }
     }
@@ -113,6 +116,7 @@ class ClusterManager(private val context: Context) {
      */
     fun restartClusterBinding() {
         Log.w(TAG, "Restarting cluster binding chain")
+        DiagnosticLog.w("cluster", "Restarting cluster binding chain")
         ClusterNavigationState.clear()
 
         // Find and finish the CarAppActivity task
@@ -121,6 +125,7 @@ class ClusterManager(private val context: Context) {
             for (appTask in am.appTasks) {
                 if (appTask.taskInfo.baseActivity?.className == CAR_APP_ACTIVITY_CLASS) {
                     Log.i(TAG, "Finishing CarAppActivity task")
+                    DiagnosticLog.w("cluster", "GM killed cluster session — finishing task and rebinding")
                     appTask.finishAndRemoveTask()
                     break
                 }

@@ -4,6 +4,7 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.util.Log
+import com.openautolink.app.diagnostics.DiagnosticLog
 
 /**
  * Session-level Android audio focus management.
@@ -34,18 +35,21 @@ class AudioFocusManager(private val audioManager: AudioManager) {
         when (focusChange) {
             AudioManager.AUDIOFOCUS_GAIN -> {
                 Log.d(TAG, "Audio focus gained")
+                DiagnosticLog.i("audio", "Audio focus gained")
                 hasFocus = true
                 onFocusRegained?.invoke()
             }
             AudioManager.AUDIOFOCUS_LOSS,
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
                 Log.d(TAG, "Audio focus lost: $focusChange")
+                DiagnosticLog.w("audio", "Audio focus lost: $focusChange")
                 hasFocus = false
                 onFocusLost?.invoke()
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                 // AAOS handles ducking via AudioAttributes automatically
                 Log.d(TAG, "Audio focus: can duck (AAOS handles)")
+                DiagnosticLog.d("audio", "Audio focus: can duck (AAOS handles)")
             }
         }
     }
