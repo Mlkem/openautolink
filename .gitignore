@@ -2,6 +2,7 @@
 build/
 build-bridge-arm64/
 .gradle/
+.kotlin/
 *.apk
 *.aab
 *.aar
