@@ -198,6 +198,30 @@ Enable OTA-style self-updating so new builds can be deployed without AAB/Play St
 - [x] App icon and logo — adaptive icon from brand asset
 - [x] Stats for nerds overlay — monospace panel with session/video stats
 
+### M10b: Modern Navigation Data (Lane Guidance + Enriched Nav)
+
+**Purpose:** Upgrade from AA's deprecated NavigationNextTurnEvent/DistanceEvent (msg 32772/32773) to the modern NavigationState (msg 32774) and NavigationCurrentPosition (msg 32775) protobuf messages. This unlocks lane guidance, richer maneuver types, cue text, roundabout details, pre-formatted distances, destination addresses, and formatted ETA.
+
+**Bridge Side:**
+- [x] Override `onNavigationState()` — parse `NavigationStep.lanes`, `NavigationManeuver`, `NavigationCue`, `NavigationRoad`, `NavigationDestination`
+- [x] Override `onCurrentPosition()` — parse `NavigationStepDistance`, `NavigationDestinationDistance`, `NavigationDistance.display_value/display_units`, current road, formatted ETA
+- [x] Map 43 modern `NavigationType` enums to wire strings (vs legacy's 19 sparse enums)
+- [x] Map `LaneDirection.Shape` enums (0-9) to wire strings for lane guidance
+- [x] Send enriched `nav_state` JSON with new fields: `lanes`, `cue`, `roundabout_exit_number`, `roundabout_exit_angle`, `display_distance`, `display_distance_unit`, `current_road`, `destination`, `eta_formatted`, `time_to_arrival_seconds`
+- [x] Suppress legacy turn/distance events when modern nav is active (`has_modern_nav_` flag)
+- [x] Continue extracting maneuver icon PNG from legacy turn events (IMAGE mode) — cached for inclusion in modern nav_state
+
+**App Side:**
+- [x] Extend `ControlMessage.NavState` with new fields: `lanes`, `cue`, `roundaboutExitNumber`, `displayDistance`, `displayDistanceUnit`, `currentRoad`, `destination`, `etaFormatted`, `timeToArrivalSeconds`
+- [x] Parse lane guidance JSON array in `ControlMessageSerializer`
+- [x] Extend `ManeuverState` with `lanes: List<LaneInfo>`, `cue`, `roundaboutExitNumber`, `currentRoad`, `destination`, `etaFormatted`
+- [x] Extend `ManeuverType` enum: added `KEEP_LEFT/RIGHT`, `MERGE_UNSPECIFIED`, `ON_RAMP_SLIGHT/SHARP/U_TURN` variants, `OFF_RAMP_SLIGHT` variants, `ROUNDABOUT_ENTER_AND_EXIT_CW/CCW`, `DESTINATION_STRAIGHT`, `FERRY_TRAIN`
+- [x] Use pre-formatted distance from bridge when available (respects phone locale)
+- [x] Build `Lane` + `LaneDirection` objects for cluster `Step.Builder.addLane()`
+- [x] Set `Step.setRoad()` for road name (separate from cue text)
+- [x] Use cue text for `Step.setCue()` when available (e.g. "Turn right onto Main St")
+- [x] Updated `ManeuverMapper`, `ManeuverIconRenderer`, `mapManeuverTypeToCarApp` for all new types
+
 ### M11: Remote Diagnostics (Car Testing Enabler)
 
 **Purpose:** Since GM AAOS has no ADB access, we need a way to observe app behavior in real-time on the car. The app sends structured logs and periodic telemetry back to the bridge over the existing control channel (port 5288). The bridge writes them to stderr, visible via `journalctl` over SSH.
@@ -400,7 +424,278 @@ If Copilot starts losing context or producing lower quality output mid-milestone
 
 ---
 
-## 💡 Future Ideas
+## � Proto Capabilities — Untapped aasdk Data
+
+aasdk v1.6 defines ~260 protobuf messages across 12 service channels. The bridge/app currently use a subset. This plan covers forwarding additional data that the phone's AA session already sends or can consume but that we currently ignore.
+
+**Excludes:** NavigationState (separate work plan, M10b).
+
+### P1: Phone Battery + Voice Session (Bridge One-Liners)
+
+**Effort:** Tiny. Bridge already receives both messages — just logs and drops them.
+
+**Bridge Side:**
+- [ ] `onBatteryStatusNotification()`: extract `battery_level` (0-100), `time_remaining_s`, `critical_battery` → forward as OAL `phone_battery` JSON control message
+- [ ] `onVoiceSessionRequest()`: extract `VoiceSessionStatus` (START/END) → forward as OAL `voice_session` JSON control message
+- [ ] Add both new message types to mock bridge (`OalMockSession`) for testing
+
+**App Side:**
+- [ ] Add `PhoneBattery` and `VoiceSession` to `ControlMessage` sealed class
+- [ ] Parse both in `ControlMessageSerializer`
+- [ ] `SessionManager`: handle `phone_battery` → update `SessionState` with phone battery level
+- [ ] `SessionManager`: handle `voice_session` → update `SessionState` with assistant active flag
+- [ ] `ProjectionViewModel`: expose phone battery + voice session state to UI
+- [ ] Status bar indicator: phone battery icon (optional, small)
+- [ ] Voice session indicator: visual cue when Google Assistant is listening on the phone (e.g., mic icon pulse, subtle overlay tint)
+- [ ] Consider: duck or mute touch forwarding during active voice session (phone is listening, touches may interfere)
+
+**OAL Protocol additions:**
+```
+Bridge → App:
+{"type":"phone_battery","level":85,"time_remaining_s":14400,"critical":false}
+{"type":"voice_session","status":"start"}
+{"type":"voice_session","status":"end"}
+```
+
+**Mock bridge:** Add `phone_battery` to periodic simulation (random 20-100%, cycling). Add `voice_session` start/end pair every ~60s.
+
+### P2: AA Theme Sync + Session Flags
+
+**Effort:** Small. Bridge needs to send one new protobuf message to the phone and tweak existing ServiceDiscoveryResponse flags.
+
+**Bridge Side — Theme Sync:**
+- [ ] When car app sends `vehicle_data` with `night_mode` change, send `UpdateUiConfigRequest` to phone via control channel with `UiTheme::UI_THEME_DARK` or `UI_THEME_LIGHT`
+- [ ] Track `last_night_mode_sent_` to avoid redundant sends (only send on change)
+- [ ] Include `#include <aap_protobuf/service/media/shared/message/UiConfig.pb.h>` and `UiTheme.pb.h`
+- [ ] Add `sendUiConfigUpdate()` method to `HeadlessAutoEntity` or control channel wrapper
+
+**Bridge Side — Session Flags:**
+- [ ] Make `hide_clock` configurable via env var `OAL_AA_HIDE_CLOCK` (default: `true` — AAOS has its own clock, no need for duplicate)
+- [ ] Make `hide_phone_signal` configurable via env var `OAL_AA_HIDE_PHONE_SIGNAL` (default: `false`)
+- [ ] Make `hide_battery_level` configurable via env var `OAL_AA_HIDE_BATTERY` (default: `false`)
+- [ ] Set in ServiceDiscoveryResponse `set_hide_clock()` / session config flags from env
+
+**App Side:**
+- [ ] Send night mode changes immediately (currently batched in 500ms vehicle_data — acceptable, night mode changes are infrequent)
+- [ ] Settings toggle: "Sync AA theme with car" (default: on)
+- [ ] Settings toggle: "Hide AA clock" (default: on) — sent to bridge via `config_update`
+- [ ] Bridge reads config_update for clock/signal/battery hide preferences, applies on next phone connection
+
+### P3: GNSS → Phone GPS Feed
+
+**Effort:** Medium. The bridge already receives `gnss` NMEA from the app and has a `// TODO` to parse it. The `sendGpsLocation()` method on the sensor handler is fully implemented and tested with vehicle_data — just needs NMEA parsing to call it.
+
+**Bridge Side:**
+- [ ] In `LiveAasdkSession::on_gnss()`: parse NMEA `$GPRMC` sentence for lat, lon, speed, bearing, date/time
+- [ ] In `LiveAasdkSession::on_gnss()`: parse NMEA `$GPGGA` sentence for altitude, fix quality, satellite count
+- [ ] Call `sensor_handler_->sendGpsLocation(lat, lon, alt, speed, bearing, timestamp_ms)` after successful parse
+- [ ] Handle coordinate format conversion: NMEA `ddmm.mmmm` → decimal degrees
+- [ ] Validate: only forward if fix quality > 0 (skip invalid/no-fix sentences)
+- [ ] Log first successful GPS forward for diagnostics
+
+**Why this matters:** Currently the phone uses only its own GPS. The car's GPS receiver (via AAOS LocationManager) can be more accurate in urban canyons, tunnels (with dead reckoning), and areas with poor phone signal. Feeding car GPS to the phone improves AA navigation accuracy.
+
+**No app changes needed** — the app already sends GNSS data. Only the bridge's parser is missing.
+
+### P4: Phone Status Service (Signal + Call State)
+
+**Effort:** Medium-high. Requires aasdk fork change — the `PhoneStatusService::messageHandler()` in aasdk currently receives `PHONE_STATUS` messages but drops them in the `default:` case without parsing.
+
+**aasdk Fork (`external/opencardev-aasdk/`):**
+- [ ] `IPhoneStatusServiceEventHandler`: add `virtual void onPhoneStatusUpdate(const aap_protobuf::service::phonestatus::message::PhoneStatus& status) = 0;`
+- [ ] `PhoneStatusService::messageHandler()`: add case for `PhoneStatusMessageId::PHONE_STATUS` → parse payload, call `eventHandler->onPhoneStatusUpdate()`
+- [ ] Commit inside submodule, push to `openautolink` branch
+
+**Bridge Side:**
+- [ ] Add PhoneStatus channel to ServiceDiscoveryResponse: `svc->set_id(ChannelId::PHONE_STATUS); svc->mutable_phone_status_service();`
+- [ ] Create `HeadlessPhoneStatusHandler` (same pattern as `HeadlessMediaStatusHandler`): implements `IPhoneStatusServiceEventHandler`, opens channel, receives messages
+- [ ] `onPhoneStatusUpdate()`: extract `signal_strength`, `calls[]` (state, duration, caller_number, caller_id) → forward as OAL `phone_status` JSON
+- [ ] Start handler after ServiceDiscoveryResponse sent (alongside other handlers)
+
+**App Side:**
+- [ ] Add `PhoneStatus` to `ControlMessage` sealed class: `signalStrength: Int?, calls: List<PhoneCall>?`
+- [ ] `PhoneCall` data class: `state: String, durationSeconds: Int, callerNumber: String?, callerId: String?`
+- [ ] Parse in `ControlMessageSerializer`
+- [ ] `SessionManager`: handle `phone_status` → update `SessionState`
+- [ ] UI: phone signal bars in status area (0-4 bars)
+- [ ] UI: incoming call notification overlay (caller name/number)
+
+**OAL Protocol:**
+```
+{"type":"phone_status","signal_strength":3,"calls":[{"state":"incoming","duration_s":0,"caller_number":"+15550123","caller_id":"Mom"}]}
+{"type":"phone_status","signal_strength":4,"calls":[]}
+```
+
+### P5: IMU Sensors → Phone (Accel, Gyro, Compass)
+
+**Effort:** Medium. Bridge sensor handler already has the pattern for all sensor types. Main work is on the app side (reading AAOS `SensorManager`) and adding the sensor types to the SDR.
+
+**Sensors to add:**
+
+| Sensor | Proto | Source in App | GM Available? |
+|--------|-------|---------------|---------------|
+| Accelerometer | `SENSOR_ACCELEROMETER_DATA` | `SensorManager.TYPE_ACCELEROMETER` | Yes (standard Android) |
+| Gyroscope | `SENSOR_GYROSCOPE_DATA` | `SensorManager.TYPE_GYROSCOPE` | Yes (standard Android) |
+| Compass | `SENSOR_COMPASS` | `SensorManager.TYPE_MAGNETIC_FIELD` → compute bearing | Yes (standard Android) |
+| Dead Reckoning | `SENSOR_DEAD_RECKONING_DATA` | `PERF_STEERING_ANGLE` + wheel speed | **No** — steering angle denied on GM |
+| GPS Satellites | `SENSOR_GPS_SATELLITE_DATA` | `GnssStatus` callback | Yes (standard Android) |
+
+**Bridge Side:**
+- [ ] Add `SENSOR_ACCELEROMETER_DATA`, `SENSOR_GYROSCOPE_DATA`, `SENSOR_COMPASS`, `SENSOR_GPS_SATELLITE_DATA` to ServiceDiscoveryResponse sensor list
+- [ ] Add `sendAccelerometer(int x_e3, int y_e3, int z_e3)` to sensor handler
+- [ ] Add `sendGyroscope(int rx_e3, int ry_e3, int rz_e3)` to sensor handler
+- [ ] Add `sendCompass(int bearing_e6, int pitch_e6, int roll_e6)` to sensor handler
+- [ ] Add `sendGpsSatellites(int in_use, int in_view, vector<SatInfo>)` to sensor handler
+- [ ] Parse new fields from `vehicle_data` JSON in `on_vehicle_data()`
+
+**App Side:**
+- [ ] New `ImuForwarder` in `input/` island: registers `SensorEventListener` for `TYPE_ACCELEROMETER`, `TYPE_GYROSCOPE`, `TYPE_MAGNETIC_FIELD`
+- [ ] Rate-limit IMU samples: ~10 Hz max (AA doesn't need 100 Hz inertial data, and control channel bandwidth matters)
+- [ ] Convert magnetic field to compass bearing (requires `SensorManager.getRotationMatrix()` + `getOrientation()`)
+- [ ] Add IMU fields to `vehicle_data` message: `accel_x_e3`, `accel_y_e3`, `accel_z_e3`, `gyro_rx_e3`, `gyro_ry_e3`, `gyro_rz_e3`, `compass_bearing_e6`
+- [ ] New `GnssSatelliteForwarder` in `input/` island: registers `GnssStatus.Callback` via `LocationManager`
+- [ ] Add satellite data to `vehicle_data` message or as separate `gnss_satellites` message: `sat_in_use`, `sat_in_view`
+- [ ] Settings toggle: "Send IMU sensors to phone" (default: on) — some users may want to save bandwidth
+- [ ] Graceful degradation: if `SensorManager` returns null for a sensor type, skip it
+
+**Skip `SENSOR_DEAD_RECKONING_DATA`** — requires steering angle (`READ_CAR_STEERING_3P` denied on GM) and per-wheel speed (not exposed via VHAL).
+
+**Why this matters:** Accelerometer + gyroscope + compass form the inertial measurement unit that AA uses for dead reckoning navigation. When the car enters a tunnel or parking garage and GPS is lost, these sensors keep the blue dot moving accurately on the map. Without them, the map freezes until GPS returns.
+
+### P6: Additional Sensor Types (RPM, CallAvailability)
+
+**Effort:** Small. Incremental additions to the existing sensor and control infrastructure.
+
+**RPM (`SENSOR_RPM`):**
+- [ ] Bridge: add `SENSOR_RPM` to SDR sensor list
+- [ ] Bridge: add `sendRpm(int rpm_e3)` to sensor handler
+- [ ] Bridge: parse `rpm_e3` from `vehicle_data` JSON in `on_vehicle_data()`
+- [ ] App: read VHAL `PERF_ENGINE_RPM` (property 291504901) — likely unavailable on EV (no engine), but include for ICE vehicles
+- [ ] App: add `rpm_e3` field to `vehicle_data` message (null if unavailable)
+
+**CallAvailability:**
+- [ ] Bridge: send `CallAvailabilityStatus { call_available = true }` after BT HFP is established
+- [ ] This tells the phone's AA that the head unit supports in-car calling — may enable the call button in AA UI
+- [ ] Send `call_available = false` if HFP drops
+
+**GPS Satellites (moved from P5 if preferred):**
+- [ ] Could be done here as a smaller scope item if P5's IMU is too large
+
+### P7: Radio Service (Phone Controls Car Radio)
+
+**Effort:** Large. Requires aasdk fork changes, new bridge handler, new OAL messages, and new app island for AAOS `BroadcastRadio` integration.
+
+**What this enables:** The phone's AA interface shows a radio UI where the user can tune FM/AM stations, seek, scan, and see station info — all controlling the car's actual radio hardware through the AAOS `BroadcastRadio` HAL.
+
+**Architecture:**
+```
+Phone AA Radio UI → aasdk RadioService channel → Bridge
+    → OAL control messages (radio_*) → App
+    → AAOS BroadcastRadio API → Car's radio hardware
+    → Station info back → App → Bridge → Phone
+```
+
+**aasdk Fork (`external/opencardev-aasdk/`):**
+- [ ] `IRadioServiceEventHandler`: add virtual methods for each radio message:
+  - `onSelectActiveRadioRequest(const SelectActiveRadioRequest&)`
+  - `onTuneToStationRequest(const TuneToStationRequest&)`
+  - `onSeekStationRequest(const SeekStationRequest&)`
+  - `onScanStationsRequest(const ScanStationsRequest&)`
+  - `onStepChannelRequest(const StepChannelRequest&)`
+  - `onMuteRadioRequest(const MuteRadioRequest&)`
+  - `onCancelOperationsRequest(const CancelOperationsRequest&)`
+  - `onConfigureChannelSpacingRequest(const ConfigureChannelSpacingRequest&)`
+  - `onGetProgramListRequest(const GetProgramListRequest&)`
+  - `onGetTrafficUpdateRequest(const GetTrafficUpdateRequest&)`
+  - `onRadioSourceRequest(const RadioSourceRequest&)`
+- [ ] `RadioService::messageHandler()`: parse each `RadioMessageId` case, call corresponding event handler method
+- [ ] Add send methods for responses/notifications:
+  - `sendTuneToStationResponse()`, `sendSeekStationResponse()`, `sendScanStationsResponse()`
+  - `sendStepChannelResponse()`, `sendMuteRadioResponse()`, `sendCancelOperationsResponse()`
+  - `sendActiveRadioNotification()`, `sendRadioStationInfoNotification()`
+  - `sendStationPresetsNotification()`, `sendRadioStateNotification()`
+  - `sendGetProgramListResponse()`, `sendGetTrafficUpdateResponse()`
+  - `sendRadioSourceResponse()`, `sendConfigureChannelSpacingResponse()`
+- [ ] Commit inside submodule, push to `openautolink` branch
+
+**Bridge Side:**
+- [ ] Add RadioService to ServiceDiscoveryResponse with FM properties:
+  ```cpp
+  svc->set_id(ChannelId::RADIO);
+  auto* rs = svc->mutable_radio_service();
+  auto* prop = rs->add_radio_properties();
+  prop->set_radio_type(RADIO_FM);
+  prop->set_supports_rds(true);
+  auto* range = prop->mutable_range();
+  range->set_min(87500);  // 87.5 MHz in kHz
+  range->set_max(108000); // 108.0 MHz in kHz
+  range->set_step(200);   // 200 kHz steps (US)
+  ```
+- [ ] Create `HeadlessRadioHandler`: implements `IRadioServiceEventHandler`
+- [ ] Forward phone radio commands → OAL control messages:
+  - `radio_tune` → `{"type":"radio_tune","frequency_khz":101100}`
+  - `radio_seek` → `{"type":"radio_seek","direction":"up"}`
+  - `radio_scan` → `{"type":"radio_scan"}`
+  - `radio_step` → `{"type":"radio_step","direction":"up"}`
+  - `radio_mute` → `{"type":"radio_mute","muted":true}`
+  - `radio_select` → `{"type":"radio_select","radio_type":"FM"}`
+- [ ] Handle responses from app → send back to phone via aasdk:
+  - `radio_station_info` → `sendRadioStationInfoNotification()`
+  - `radio_state` → `sendRadioStateNotification()`
+  - `radio_presets` → `sendStationPresetsNotification()`
+- [ ] Start handler after ServiceDiscoveryResponse sent
+- [ ] Make radio configurable: `OAL_AA_RADIO_ENABLED` env var (default: `false` until tested)
+
+**App Side:**
+- [ ] New `radio/` island: `RadioController` interface + `RadioControllerImpl`
+- [ ] AAOS `BroadcastRadio` integration:
+  - `RadioManager.openTuner()` — obtain radio tuner
+  - Handle `TuneToStation`: `tuner.tune(ProgramSelector.createAmFmSelector(freq))`
+  - Handle `SeekStation`: `tuner.seek(direction)`
+  - Handle `ScanStation`: `tuner.scan(direction)`
+  - Handle `StepChannel`: `tuner.step(direction)`
+  - Handle `MuteRadio`: system audio mute for radio
+- [ ] `RadioManager.Callback` for station info updates → send back to bridge:
+  - `onCurrentProgramInfoChanged()` → `radio_station_info` with frequency, station name, RDS data
+  - `onProgramListChanged()` → `radio_presets` with station list
+- [ ] Parse radio OAL control messages in `ControlMessageSerializer`
+- [ ] Add `RadioTune`, `RadioSeek`, `RadioScan`, `RadioStep`, `RadioMute`, `RadioSelect` to `ControlMessage`
+- [ ] Add `RadioStationInfo`, `RadioState`, `RadioPresets` to `ControlMessage` (app→bridge responses)
+- [ ] `SessionManager`: route radio messages to `RadioController`
+- [ ] `RadioController`: send station info/state updates back via `ConnectionManager.sendControlMessage()`
+- [ ] Permissions: `android.permission.ACCESS_BROADCAST_RADIO` in manifest
+- [ ] Graceful degradation: if `RadioManager` is unavailable (some AAOS builds), log and don't advertise radio (tell bridge via hello capabilities)
+- [ ] Settings: "Enable AA Radio Control" toggle (default: off until validated on car)
+
+**Car Testing Unknowns:**
+| Unknown | How to test | What to log |
+|---------|------------|-------------|
+| Is `RadioManager` accessible to third-party apps on GM? | Attempt `getSystemService(RADIO_SERVICE)`, log result | `tag=radio`: service available, tuner opened, or SecurityException |
+| FM frequency range on GM (US = 87.5-108 MHz) | Read RadioManager properties | `tag=radio`: supported bands, frequency range, spacing |
+| Does tuning work without audio routing? | Tune to known station, check if audio plays | `tag=radio`: tune result, program info callback received |
+| RDS data availability | Tune to RDS-capable station, log metadata | `tag=radio`: RDS program name, PI code, PTY |
+
+---
+
+### Proto Capability Dependency Graph
+
+```
+P1 (Battery + Voice)  ← no deps, bridge-only changes + app UI
+P2 (Theme + Flags)    ← needs P1's night_mode flow verified
+P3 (GNSS → Phone)     ← no deps, bridge-only NMEA parser
+P4 (Phone Status)     ← needs aasdk fork change
+P5 (IMU Sensors)      ← no deps, bridge sensor handler + app SensorManager
+P6 (RPM + CallAvail)  ← no deps, incremental
+P7 (Radio)            ← needs aasdk fork change + AAOS BroadcastRadio
+```
+
+**Recommended order:** P1 → P3 → P2 → P5 → P6 → P4 → P7
+
+P1 and P3 are the quickest wins (bridge-only or near bridge-only). P4 and P7 require aasdk fork changes and should be batched together to minimize submodule churn.
+
+---
+
+## �💡 Future Ideas
 
 ### Two-Way Config Sync
 - Bridge sends config echo after settings update

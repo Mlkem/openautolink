@@ -308,6 +308,10 @@ void OalSession::send_nav_state(const std::string& maneuver, int distance_m,
     send_control_line(oss.str());
 }
 
+void OalSession::send_nav_state_modern(const std::string& json_line) {
+    send_control_line(json_line);
+}
+
 void OalSession::send_media_metadata(const std::string& title, const std::string& artist,
                                       const std::string& album, int duration_ms,
                                       int position_ms, bool playing,

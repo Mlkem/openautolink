@@ -210,7 +210,19 @@ class ClusterMainSession : Session() {
         val maneuverObj = buildManeuver(maneuver, carContext)
         val stepBuilder = Step.Builder()
         stepBuilder.setManeuver(maneuverObj)
-        maneuver.roadName?.let { stepBuilder.setCue(it) }
+        // Use cue text if available (richer instruction from modern proto), else road name
+        val cueText = maneuver.cue ?: maneuver.roadName
+        cueText?.let { stepBuilder.setCue(it) }
+        maneuver.roadName?.let { stepBuilder.setRoad(it) }
+
+        // Add lane guidance from modern NavigationState
+        maneuver.lanes?.let { laneInfoList ->
+            if (laneInfoList.isNotEmpty()) {
+                for (lane in buildLanes(laneInfoList)) {
+                    stepBuilder.addLane(lane)
+                }
+            }
+        }
 
         val distance = toDistance(maneuver.distanceMeters ?: 0)
         val stepEstimate = TravelEstimate.Builder(distance, eta).build()

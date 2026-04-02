@@ -56,4 +56,13 @@ object DistanceFormatter {
     private fun isImperial(locale: Locale): Boolean {
         return locale.country in setOf("US", "LR", "MM")
     }
+
+    fun unitLabel(wireUnit: String): String = when (wireUnit) {
+        "meters" -> "m"
+        "kilometers", "kilometers_p1" -> "km"
+        "miles", "miles_p1" -> "mi"
+        "feet" -> "ft"
+        "yards" -> "yd"
+        else -> wireUnit
+    }
 }

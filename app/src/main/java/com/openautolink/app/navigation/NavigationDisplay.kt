@@ -27,8 +27,17 @@ data class ManeuverState(
     val formattedDistance: String,
     val roadName: String?,
     val etaSeconds: Int?,
-    val navImageBase64: String? = null
+    val navImageBase64: String? = null,
+    val lanes: List<LaneInfo>? = null,
+    val cue: String? = null,
+    val roundaboutExitNumber: Int? = null,
+    val currentRoad: String? = null,
+    val destination: String? = null,
+    val etaFormatted: String? = null
 )
+
+data class LaneInfo(val directions: List<LaneDirectionInfo>)
+data class LaneDirectionInfo(val shape: String, val highlighted: Boolean)
 
 /**
  * Maneuver types mapped from bridge nav_state maneuver strings.
@@ -46,19 +55,34 @@ enum class ManeuverType {
     TURN_SHARP_RIGHT,
     U_TURN_LEFT,
     U_TURN_RIGHT,
+    KEEP_LEFT,
+    KEEP_RIGHT,
     MERGE_LEFT,
     MERGE_RIGHT,
+    MERGE_UNSPECIFIED,
     FORK_LEFT,
     FORK_RIGHT,
     ON_RAMP_LEFT,
     ON_RAMP_RIGHT,
+    ON_RAMP_SLIGHT_LEFT,
+    ON_RAMP_SLIGHT_RIGHT,
+    ON_RAMP_SHARP_LEFT,
+    ON_RAMP_SHARP_RIGHT,
+    ON_RAMP_U_TURN_LEFT,
+    ON_RAMP_U_TURN_RIGHT,
     OFF_RAMP_LEFT,
     OFF_RAMP_RIGHT,
+    OFF_RAMP_SLIGHT_LEFT,
+    OFF_RAMP_SLIGHT_RIGHT,
     ROUNDABOUT_ENTER,
     ROUNDABOUT_EXIT,
+    ROUNDABOUT_ENTER_AND_EXIT_CW,
+    ROUNDABOUT_ENTER_AND_EXIT_CCW,
     DESTINATION,
+    DESTINATION_STRAIGHT,
     DESTINATION_LEFT,
     DESTINATION_RIGHT,
     FERRY,
+    FERRY_TRAIN,
     NAME_CHANGE
 }

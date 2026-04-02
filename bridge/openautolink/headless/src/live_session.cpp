@@ -2654,8 +2654,10 @@ void HeadlessNavStatusHandler::onStatusUpdate(
     if (status != 1) {
         last_maneuver_.clear();
         last_road_.clear();
+        last_nav_image_base64_.clear();
         last_distance_m_ = 0;
         last_eta_s_ = 0;
+        has_modern_nav_ = false;
     }
 
     channel_->receive(shared_from_this());
@@ -2667,11 +2669,19 @@ void HeadlessNavStatusHandler::onTurnEvent(
     last_road_ = turnEvent.road();
 
     // Extract maneuver icon PNG (available when SDR uses IMAGE mode)
+    // Always extract the image even in modern mode — it's used by onNavigationState
     if (turnEvent.has_image() && !turnEvent.image().empty()) {
         const auto& img = turnEvent.image();
         last_nav_image_base64_ = base64_encode(
             reinterpret_cast<const uint8_t*>(img.data()), img.size());
         std::cerr << "[aasdk] nav icon: " << img.size() << " bytes" << std::endl;
+    }
+
+    // If modern nav is active, don't send legacy turn events — the image is
+    // cached and will be included in the next modern nav_state
+    if (has_modern_nav_) {
+        channel_->receive(shared_from_this());
+        return;
     }
 
     // Map turn event+side to maneuver string
@@ -2723,6 +2733,12 @@ void HeadlessNavStatusHandler::onTurnEvent(
 void HeadlessNavStatusHandler::onDistanceEvent(
     const aap_protobuf::service::navigationstatus::message::NavigationNextTurnDistanceEvent& distanceEvent)
 {
+    // If modern nav is active, legacy distance events are redundant — skip
+    if (has_modern_nav_) {
+        channel_->receive(shared_from_this());
+        return;
+    }
+
     last_distance_m_ = distanceEvent.distance_meters();
     last_eta_s_ = distanceEvent.time_to_turn_seconds();
 
@@ -2733,6 +2749,246 @@ void HeadlessNavStatusHandler::onDistanceEvent(
     if (oal_session_) {
         oal_session_->send_nav_state(last_maneuver_, last_distance_m_,
                                      last_road_, last_eta_s_);
+    }
+
+    channel_->receive(shared_from_this());
+}
+
+// Map NavigationManeuver.NavigationType enum to wire string
+static std::string map_modern_maneuver_type(int type) {
+    switch (type) {
+        case 1: return "depart";
+        case 2: return "name_change";
+        case 3: return "keep_left";
+        case 4: return "keep_right";
+        case 5: return "turn_slight_left";
+        case 6: return "turn_slight_right";
+        case 7: return "turn_left";
+        case 8: return "turn_right";
+        case 9: return "turn_sharp_left";
+        case 10: return "turn_sharp_right";
+        case 11: return "u_turn_left";
+        case 12: return "u_turn_right";
+        case 13: return "on_ramp_slight_left";
+        case 14: return "on_ramp_slight_right";
+        case 15: return "on_ramp_left";
+        case 16: return "on_ramp_right";
+        case 17: return "on_ramp_sharp_left";
+        case 18: return "on_ramp_sharp_right";
+        case 19: return "on_ramp_u_turn_left";
+        case 20: return "on_ramp_u_turn_right";
+        case 21: return "off_ramp_slight_left";
+        case 22: return "off_ramp_slight_right";
+        case 23: return "off_ramp_left";
+        case 24: return "off_ramp_right";
+        case 25: return "fork_left";
+        case 26: return "fork_right";
+        case 27: return "merge_left";
+        case 28: return "merge_right";
+        case 29: return "merge_unspecified";
+        case 30: return "roundabout_enter";
+        case 31: return "roundabout_exit";
+        case 32: return "roundabout_enter_and_exit_cw";
+        case 33: return "roundabout_enter_and_exit_cw_with_angle";
+        case 34: return "roundabout_enter_and_exit_ccw";
+        case 35: return "roundabout_enter_and_exit_ccw_with_angle";
+        case 36: return "straight";
+        case 37: return "ferry_boat";
+        case 38: return "ferry_train";
+        case 39: return "destination";
+        case 40: return "destination_straight";
+        case 41: return "destination_left";
+        case 42: return "destination_right";
+        default: return "unknown";
+    }
+}
+
+// Map NavigationLane.LaneDirection.Shape enum to wire string
+static std::string map_lane_shape(int shape) {
+    switch (shape) {
+        case 0: return "unknown";
+        case 1: return "straight";
+        case 2: return "normal_left";
+        case 3: return "normal_right";
+        case 4: return "slight_left";
+        case 5: return "slight_right";
+        case 6: return "sharp_left";
+        case 7: return "sharp_right";
+        case 8: return "u_turn_left";
+        case 9: return "u_turn_right";
+        default: return "unknown";
+    }
+}
+
+// Map DistanceUnits enum to wire string
+static std::string map_distance_unit(int unit) {
+    switch (unit) {
+        case 0: return "meters";
+        case 1: return "kilometers";
+        case 2: return "kilometers_p1";
+        case 3: return "miles";
+        case 4: return "miles_p1";
+        case 5: return "feet";
+        case 6: return "yards";
+        default: return "unknown";
+    }
+}
+
+void HeadlessNavStatusHandler::onNavigationState(
+    const aap_protobuf::service::navigationstatus::message::NavigationState& navState)
+{
+    has_modern_nav_ = true;
+
+    if (navState.steps_size() == 0) {
+        std::cerr << "[aasdk] modern nav state: no steps" << std::endl;
+        channel_->receive(shared_from_this());
+        return;
+    }
+
+    // Build enriched nav_state JSON with all modern data
+    std::ostringstream oss;
+    oss << R"({"type":"nav_state")";
+
+    // First step is the current/next maneuver
+    const auto& step0 = navState.steps(0);
+
+    // Maneuver
+    if (step0.has_maneuver()) {
+        const auto& m = step0.maneuver();
+        std::string mtype = m.has_type() ? map_modern_maneuver_type(m.type()) : "unknown";
+        last_maneuver_ = mtype;
+        oss << R"(,"maneuver":")" << mtype << R"(")";
+
+        if (m.has_roundabout_exit_number()) {
+            oss << R"(,"roundabout_exit_number":)" << m.roundabout_exit_number();
+        }
+        if (m.has_roundabout_exit_angle()) {
+            oss << R"(,"roundabout_exit_angle":)" << m.roundabout_exit_angle();
+        }
+    }
+
+    // Road name
+    if (step0.has_road() && step0.road().has_name()) {
+        last_road_ = step0.road().name();
+        oss << R"(,"road":")" << oal_json_escape(step0.road().name()) << R"(")";
+    }
+
+    // Cue text (turn instruction like "Turn right onto Main St")
+    if (step0.has_cue() && step0.cue().alternate_text_size() > 0) {
+        oss << R"(,"cue":")" << oal_json_escape(step0.cue().alternate_text(0)) << R"(")";
+    }
+
+    // Lane guidance
+    if (step0.lanes_size() > 0) {
+        oss << R"(,"lanes":[)";
+        for (int i = 0; i < step0.lanes_size(); ++i) {
+            if (i > 0) oss << ",";
+            const auto& lane = step0.lanes(i);
+            oss << R"({"directions":[)";
+            for (int j = 0; j < lane.lane_directions_size(); ++j) {
+                if (j > 0) oss << ",";
+                const auto& ld = lane.lane_directions(j);
+                oss << R"({"shape":")" << map_lane_shape(ld.has_shape() ? ld.shape() : 0) << R"(")";
+                oss << R"(,"highlighted":)" << (ld.has_is_highlighted() && ld.is_highlighted() ? "true" : "false");
+                oss << "}";
+            }
+            oss << "]}";
+        }
+        oss << "]";
+    }
+
+    // Carry forward cached image from legacy turn events
+    if (!last_nav_image_base64_.empty()) {
+        oss << R"(,"nav_image_base64":")" << last_nav_image_base64_ << R"(")";
+    }
+
+    // Carry forward cached distance (updated by onCurrentPosition)
+    oss << R"(,"distance_meters":)" << last_distance_m_;
+    oss << R"(,"eta_seconds":)" << last_eta_s_;
+
+    // Destinations
+    if (navState.destinations_size() > 0) {
+        const auto& dest = navState.destinations(0);
+        if (dest.has_address()) {
+            oss << R"(,"destination":")" << oal_json_escape(dest.address()) << R"(")";
+        }
+    }
+
+    oss << "}";
+
+    std::cerr << "[aasdk] modern nav state: " << step0.lanes_size()
+              << " lanes, maneuver=" << last_maneuver_ << std::endl;
+
+    if (oal_session_) {
+        oal_session_->send_nav_state_modern(oss.str());
+    }
+
+    channel_->receive(shared_from_this());
+}
+
+void HeadlessNavStatusHandler::onCurrentPosition(
+    const aap_protobuf::service::navigationstatus::message::NavigationCurrentPosition& position)
+{
+    // Update cached distance values from modern position data
+    if (position.has_step_distance()) {
+        const auto& sd = position.step_distance();
+        if (sd.has_distance() && sd.distance().has_meters()) {
+            last_distance_m_ = sd.distance().meters();
+        }
+        if (sd.has_time_to_step_seconds()) {
+            last_eta_s_ = static_cast<int>(sd.time_to_step_seconds());
+        }
+    }
+
+    // Build nav_state update with position data
+    std::ostringstream oss;
+    oss << R"({"type":"nav_state")";
+
+    // Include cached maneuver + road
+    if (!last_maneuver_.empty()) {
+        oss << R"(,"maneuver":")" << last_maneuver_ << R"(")";
+    }
+    if (!last_road_.empty()) {
+        oss << R"(,"road":")" << oal_json_escape(last_road_) << R"(")";
+    }
+
+    oss << R"(,"distance_meters":)" << last_distance_m_;
+    oss << R"(,"eta_seconds":)" << last_eta_s_;
+
+    // Pre-formatted display distance (e.g. "0.3 mi")
+    if (position.has_step_distance() && position.step_distance().has_distance()) {
+        const auto& dist = position.step_distance().distance();
+        if (dist.has_display_value()) {
+            oss << R"(,"display_distance":")" << oal_json_escape(dist.display_value()) << R"(")";
+        }
+        if (dist.has_display_units()) {
+            oss << R"(,"display_distance_unit":")" << map_distance_unit(dist.display_units()) << R"(")";
+        }
+    }
+
+    // Current road (the road you're on, vs. the road you're turning onto)
+    if (position.has_current_road() && position.current_road().has_name()) {
+        oss << R"(,"current_road":")" << oal_json_escape(position.current_road().name()) << R"(")";
+    }
+
+    // Destination ETA
+    if (position.destination_distances_size() > 0) {
+        const auto& dd = position.destination_distances(0);
+        if (dd.has_estimated_time_at_arrival()) {
+            oss << R"(,"eta_formatted":")" << oal_json_escape(dd.estimated_time_at_arrival()) << R"(")";
+        }
+        if (dd.has_time_to_arrival_seconds()) {
+            oss << R"(,"time_to_arrival_seconds":)" << dd.time_to_arrival_seconds();
+        }
+    }
+
+    oss << "}";
+
+    std::cerr << "[aasdk] nav position: " << last_distance_m_ << "m, "
+              << last_eta_s_ << "s" << std::endl;
+
+    if (oal_session_) {
+        oal_session_->send_nav_state_modern(oss.str());
     }
 
     channel_->receive(shared_from_this());

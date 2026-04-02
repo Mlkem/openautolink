@@ -44,8 +44,21 @@ sealed class ControlMessage {
         val distanceMeters: Int?,
         val road: String?,
         val etaSeconds: Int?,
-        val navImageBase64: String? = null
+        val navImageBase64: String? = null,
+        val lanes: List<NavLane>? = null,
+        val cue: String? = null,
+        val roundaboutExitNumber: Int? = null,
+        val roundaboutExitAngle: Int? = null,
+        val displayDistance: String? = null,
+        val displayDistanceUnit: String? = null,
+        val currentRoad: String? = null,
+        val destination: String? = null,
+        val etaFormatted: String? = null,
+        val timeToArrivalSeconds: Long? = null
     ) : ControlMessage()
+
+    data class NavLane(val directions: List<NavLaneDirection>)
+    data class NavLaneDirection(val shape: String, val highlighted: Boolean)
 
     data class MediaMetadata(
         val title: String?,

@@ -10,6 +10,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="androidx.car.app.NAVIGATION_TEMPLATES" />
+    <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
 
     <!-- Car permissions for VHAL property monitoring.
          Only properties confirmed available on 2024 Blazer EV are used.
@@ -31,10 +32,6 @@
         android:label="OpenAutoLink"
         android:supportsRtl="true"
         android:theme="@style/Theme.OpenAutoLink">
-
-        <meta-data
-            android:name="com.google.android.gms.car.application"
-            android:resource="@xml/automotive_app_desc" />
 
         <activity
             android:name=".MainActivity"
@@ -76,19 +73,6 @@
                 android:value="true" />
         </activity>
 
-        <!-- MediaBrowserService for AAOS media source integration -->
-        <service
-            android:name=".media.OalMediaBrowserService"
-            android:exported="true"
-            android:foregroundServiceType="mediaPlayback">
-            <intent-filter>
-                <action android:name="android.media.browse.MediaBrowserService" />
-            </intent-filter>
-            <meta-data
-                android:name="com.gm.homescreen.visibility"
-                android:value="HIDDEN" />
-        </service>
-
         <!-- Cluster Navigation CarAppService (headless — no UI on main display) -->
         <service
             android:name=".cluster.OalClusterService"
@@ -114,11 +98,5 @@
             android:name="com.android.automotive.application.DISTRACTION_OPTIMIZED"
             android:value="true" />
 
-        <!-- Shim for Templates Host's unregistered ClusterIconContentProvider -->
-        <provider
-            android:name=".cluster.ClusterIconShimProvider"
-            android:authorities="com.google.android.apps.automotive.templates.host.ClusterIconContentProvider"
-            android:exported="true"
-            android:grantUriPermissions="true" />
     </application>
 </manifest>

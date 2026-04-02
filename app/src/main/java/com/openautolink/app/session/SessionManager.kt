@@ -18,7 +18,6 @@ import com.openautolink.app.input.GnssForwarder
 import com.openautolink.app.input.GnssForwarderImpl
 import com.openautolink.app.input.VehicleDataForwarder
 import com.openautolink.app.input.VehicleDataForwarderImpl
-import com.openautolink.app.media.OalMediaBrowserService
 import com.openautolink.app.media.OalMediaSessionManager
 import com.openautolink.app.navigation.ManeuverState
 import com.openautolink.app.navigation.NavigationDisplay
@@ -163,9 +162,6 @@ class SessionManager(
         _mediaSessionManager?.release()
         _mediaSessionManager = context?.let { OalMediaSessionManager(it) }
         _mediaSessionManager?.initialize()
-        _mediaSessionManager?.getSessionToken()?.let { token ->
-            OalMediaBrowserService.updateSessionToken(token)
-        }
 
         // Enable and launch cluster service binding
         _clusterManager?.release()

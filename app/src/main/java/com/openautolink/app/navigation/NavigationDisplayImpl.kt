@@ -16,7 +16,18 @@ class NavigationDisplayImpl : NavigationDisplay {
 
     override fun onNavState(state: ControlMessage.NavState) {
         val type = ManeuverMapper.fromWire(state.maneuver)
-        val formattedDist = DistanceFormatter.format(state.distanceMeters)
+        // Use pre-formatted distance from bridge if available, else format locally
+        val formattedDist = if (!state.displayDistance.isNullOrEmpty() && !state.displayDistanceUnit.isNullOrEmpty()) {
+            "${state.displayDistance} ${DistanceFormatter.unitLabel(state.displayDistanceUnit)}"
+        } else {
+            DistanceFormatter.format(state.distanceMeters)
+        }
+
+        val lanes = state.lanes?.map { lane ->
+            LaneInfo(lane.directions.map { dir ->
+                LaneDirectionInfo(dir.shape, dir.highlighted)
+            })
+        }
 
         _currentManeuver.value = ManeuverState(
             type = type,
@@ -24,7 +35,13 @@ class NavigationDisplayImpl : NavigationDisplay {
             formattedDistance = formattedDist,
             roadName = state.road,
             etaSeconds = state.etaSeconds,
-            navImageBase64 = state.navImageBase64
+            navImageBase64 = state.navImageBase64,
+            lanes = lanes,
+            cue = state.cue,
+            roundaboutExitNumber = state.roundaboutExitNumber,
+            currentRoad = state.currentRoad,
+            destination = state.destination,
+            etaFormatted = state.etaFormatted
         )
     }
 

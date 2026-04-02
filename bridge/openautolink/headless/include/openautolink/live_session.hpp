@@ -503,6 +503,8 @@ private:
     void onStatusUpdate(const aap_protobuf::service::navigationstatus::message::NavigationStatus& navStatus) override;
     void onTurnEvent(const aap_protobuf::service::navigationstatus::message::NavigationNextTurnEvent& turnEvent) override;
     void onDistanceEvent(const aap_protobuf::service::navigationstatus::message::NavigationNextTurnDistanceEvent& distanceEvent) override;
+    void onNavigationState(const aap_protobuf::service::navigationstatus::message::NavigationState& navState) override;
+    void onCurrentPosition(const aap_protobuf::service::navigationstatus::message::NavigationCurrentPosition& position) override;
 
     boost::asio::io_service::strand strand_;
     std::shared_ptr<aasdk::channel::navigationstatus::NavigationStatusService> channel_;
@@ -515,6 +517,7 @@ private:
     std::string last_nav_image_base64_;
     int last_distance_m_ = 0;
     int last_eta_s_ = 0;
+    bool has_modern_nav_ = false;  // true once we receive msg 32774
 };
 
 class HeadlessMediaStatusHandler

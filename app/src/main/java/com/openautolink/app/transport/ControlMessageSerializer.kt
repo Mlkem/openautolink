@@ -68,13 +68,36 @@ object ControlMessageSerializer {
 
             "mic_stop" -> ControlMessage.MicStop
 
-            "nav_state" -> ControlMessage.NavState(
-                maneuver = obj["maneuver"]?.jsonPrimitive?.content,
-                distanceMeters = obj["distance_meters"]?.jsonPrimitive?.content?.toIntOrNull(),
-                road = obj["road"]?.jsonPrimitive?.content,
-                etaSeconds = obj["eta_seconds"]?.jsonPrimitive?.content?.toIntOrNull(),
-                navImageBase64 = obj["nav_image_base64"]?.jsonPrimitive?.content
-            )
+            "nav_state" -> {
+                val lanes = obj["lanes"]?.jsonArray?.map { laneEl ->
+                    val laneObj = laneEl.jsonObject
+                    val directions = laneObj["directions"]?.jsonArray?.map { dirEl ->
+                        val dirObj = dirEl.jsonObject
+                        ControlMessage.NavLaneDirection(
+                            shape = dirObj["shape"]?.jsonPrimitive?.content ?: "unknown",
+                            highlighted = dirObj["highlighted"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false
+                        )
+                    } ?: emptyList()
+                    ControlMessage.NavLane(directions)
+                }
+                ControlMessage.NavState(
+                    maneuver = obj["maneuver"]?.jsonPrimitive?.content,
+                    distanceMeters = obj["distance_meters"]?.jsonPrimitive?.content?.toIntOrNull(),
+                    road = obj["road"]?.jsonPrimitive?.content,
+                    etaSeconds = obj["eta_seconds"]?.jsonPrimitive?.content?.toIntOrNull(),
+                    navImageBase64 = obj["nav_image_base64"]?.jsonPrimitive?.content,
+                    lanes = lanes,
+                    cue = obj["cue"]?.jsonPrimitive?.content,
+                    roundaboutExitNumber = obj["roundabout_exit_number"]?.jsonPrimitive?.content?.toIntOrNull(),
+                    roundaboutExitAngle = obj["roundabout_exit_angle"]?.jsonPrimitive?.content?.toIntOrNull(),
+                    displayDistance = obj["display_distance"]?.jsonPrimitive?.content,
+                    displayDistanceUnit = obj["display_distance_unit"]?.jsonPrimitive?.content,
+                    currentRoad = obj["current_road"]?.jsonPrimitive?.content,
+                    destination = obj["destination"]?.jsonPrimitive?.content,
+                    etaFormatted = obj["eta_formatted"]?.jsonPrimitive?.content,
+                    timeToArrivalSeconds = obj["time_to_arrival_seconds"]?.jsonPrimitive?.content?.toLongOrNull()
+                )
+            }
 
             "media_metadata" -> ControlMessage.MediaMetadata(
                 title = obj["title"]?.jsonPrimitive?.content,

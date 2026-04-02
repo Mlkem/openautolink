@@ -92,6 +92,7 @@ public:
     void send_nav_state(const std::string& maneuver, int distance_m,
                         const std::string& road, int eta_s,
                         const std::string& nav_image_base64 = "");
+    void send_nav_state_modern(const std::string& json_line);
     void send_media_metadata(const std::string& title, const std::string& artist,
                              const std::string& album, int duration_ms, int position_ms, bool playing,
                              const std::string& album_art_base64 = "");
