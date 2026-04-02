@@ -23,7 +23,8 @@ class NavigationDisplayImpl : NavigationDisplay {
             distanceMeters = state.distanceMeters,
             formattedDistance = formattedDist,
             roadName = state.road,
-            etaSeconds = state.etaSeconds
+            etaSeconds = state.etaSeconds,
+            navImageBase64 = state.navImageBase64
         )
     }
 

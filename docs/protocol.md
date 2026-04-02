@@ -36,7 +36,9 @@ Bidirectional newline-delimited JSON. Each message is a single JSON object follo
 {"type":"mic_start","sample_rate":16000}
 {"type":"mic_stop"}
 {"type":"nav_state","maneuver":"turn_right","distance_meters":150,"road":"Main St","eta_seconds":420}
+{"type":"nav_state","maneuver":"turn_right","distance_meters":150,"road":"Main St","eta_seconds":420,"nav_image_base64":"iVBORw0KGgo..."}
 {"type":"media_metadata","title":"Song Name","artist":"Artist","album":"Album","duration_ms":240000,"position_ms":60000,"playing":true}
+{"type":"media_metadata","title":"Song Name","artist":"Artist","album":"Album","duration_ms":240000,"position_ms":60000,"playing":true,"album_art_base64":"iVBORw0KGgo..."}
 {"type":"config_echo","video_codec":"h264","video_width":1920,"video_height":1080,"video_fps":60,"aa_resolution":"1080p"}
 {"type":"error","code":100,"message":"Phone connection lost"}
 {"type":"stats","video_frames_sent":1200,"audio_frames_sent":3400,"uptime_seconds":120}
@@ -156,6 +158,67 @@ Direction 1 (app→bridge): microphone capture. Purpose field = 2 (assistant) or
 - Encoding: 16-bit signed integer, little-endian
 - Interleaved for stereo (L R L R ...)
 - No compression — raw PCM over TCP (local network, bandwidth is not a constraint)
+
+## Remote Diagnostics Channel
+
+The control channel doubles as a diagnostics backhaul. Since the GM AAOS head unit has **no ADB access**, the app sends structured log/telemetry messages back to the bridge over the existing control TCP connection (port 5288). The bridge writes these to its stderr (visible via `journalctl -u openautolink.service -f` over SSH), giving near-real-time visibility into app behavior on the car.
+
+Diagnostics are **opt-in** — the app only sends them when enabled in Settings (default: off). When enabled, the app sends two types of messages:
+
+### App → Bridge: `app_log`
+
+Structured log events from the app. These are **not** raw logcat lines — they are curated, tagged events for specific areas of interest.
+
+```jsonl
+{"type":"app_log","ts":1711929600000,"level":"INFO","tag":"video","msg":"Codec selected: c2.qti.avc.decoder (HW)"}
+{"type":"app_log","ts":1711929600100,"level":"WARN","tag":"audio","msg":"AudioTrack underrun on purpose=media, count=3"}
+{"type":"app_log","ts":1711929600200,"level":"ERROR","tag":"cluster","msg":"ClusterMainSession destroyed by system after 2300ms"}
+{"type":"app_log","ts":1711929600300,"level":"INFO","tag":"vhal","msg":"Property PERF_VEHICLE_SPEED unavailable, skipping"}
+{"type":"app_log","ts":1711929600400,"level":"DEBUG","tag":"update","msg":"PackageInstaller session rejected: INSTALL_FAILED_USER_RESTRICTED"}
+{"type":"app_log","ts":1711929600500,"level":"INFO","tag":"input","msg":"KeyEvent KEYCODE_VOICE_ASSIST intercepted=false, sent to system"}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ts` | u64 | Unix timestamp milliseconds (System.currentTimeMillis) |
+| `level` | string | `DEBUG`, `INFO`, `WARN`, `ERROR` |
+| `tag` | string | Subsystem: `video`, `audio`, `cluster`, `vhal`, `update`, `input`, `transport`, `session`, `system` |
+| `msg` | string | Human-readable event description (max 500 chars) |
+
+### App → Bridge: `app_telemetry`
+
+Periodic snapshot of app-side metrics. Sent every 5 seconds when diagnostics are enabled.
+
+```jsonl
+{"type":"app_telemetry","ts":1711929605000,"video":{"fps":58.2,"decoded":1746,"dropped":3,"codec":"c2.qti.avc.decoder","width":1920,"height":1080},"audio":{"active":["media"],"underruns":{"media":0},"frames_written":{"media":14400}},"session":{"state":"STREAMING","uptime_ms":30000},"cluster":{"bound":true,"alive":true,"rebinds":0}}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ts` | u64 | Snapshot timestamp |
+| `video` | object | fps, decoded/dropped frame counts, active codec, resolution |
+| `audio` | object | active purposes, underrun counts, frames written per purpose |
+| `session` | object | current state, session uptime |
+| `cluster` | object | bound/alive status, rebind count (tracks GM kill behavior) |
+
+### Bridge Handling
+
+The bridge treats `app_log` and `app_telemetry` as opaque — it writes them to stderr with a `[CAR]` prefix and does not parse or act on them. This keeps the bridge simple and makes all app diagnostics visible in the SSH journal stream:
+
+```
+[CAR] INFO  video   Codec selected: c2.qti.avc.decoder (HW)
+[CAR] WARN  audio   AudioTrack underrun on purpose=media, count=3
+[CAR] ERROR cluster ClusterMainSession destroyed by system after 2300ms
+[CAR] TELEM {"video":{"fps":58.2,...},"audio":{...},...}
+```
+
+### Performance Guardrails
+
+- `app_log` messages are rate-limited to **20/second** in the app (ring buffer, newest wins). This prevents log storms from blocking the control channel
+- `app_telemetry` is sent every 5 seconds — one JSON line, negligible bandwidth
+- Both are suppressed entirely when diagnostics are disabled
+- Neither message type generates a response from the bridge
+- Log level filtering in Settings: choose minimum level to send (DEBUG sends everything, ERROR sends only errors)
 
 ## Error Handling
 

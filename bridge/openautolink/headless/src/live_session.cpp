@@ -518,12 +518,16 @@ void HeadlessAutoEntity::onServiceDiscoveryRequest(
       bs->set_car_address(bt_mac);
       bs->add_supported_pairing_methods(aap_protobuf::service::bluetooth::message::BLUETOOTH_PAIRING_PIN);
       bs->add_supported_pairing_methods(aap_protobuf::service::bluetooth::message::BLUETOOTH_PAIRING_NUMERIC_COMPARISON); }
-    // Navigation Status — receive turn-by-turn from phone
+    // Navigation Status — receive turn-by-turn from phone (IMAGE mode for icon PNGs)
     { auto* svc = response.add_channels();
       svc->set_id(static_cast<int32_t>(aasdk::messenger::ChannelId::NAVIGATION_STATUS));
       auto* ns = svc->mutable_navigation_status_service();
       ns->set_minimum_interval_ms(500);
-      ns->set_type(aap_protobuf::service::navigationstatus::NavigationStatusService::ENUM); }
+      ns->set_type(aap_protobuf::service::navigationstatus::NavigationStatusService::IMAGE);
+      auto* img_opts = ns->mutable_image_options();
+      img_opts->set_width(256);
+      img_opts->set_height(256);
+      img_opts->set_colour_depth_bits(32); }
     // Media Playback Status — receive track info from phone
     { auto* svc = response.add_channels();
       svc->set_id(static_cast<int32_t>(aasdk::messenger::ChannelId::MEDIA_PLAYBACK_STATUS));
@@ -2662,6 +2666,14 @@ void HeadlessNavStatusHandler::onTurnEvent(
 {
     last_road_ = turnEvent.road();
 
+    // Extract maneuver icon PNG (available when SDR uses IMAGE mode)
+    if (turnEvent.has_image() && !turnEvent.image().empty()) {
+        const auto& img = turnEvent.image();
+        last_nav_image_base64_ = base64_encode(
+            reinterpret_cast<const uint8_t*>(img.data()), img.size());
+        std::cerr << "[aasdk] nav icon: " << img.size() << " bytes" << std::endl;
+    }
+
     // Map turn event+side to maneuver string
     std::string maneuver = "unknown";
     if (turnEvent.has_event()) {
@@ -2698,10 +2710,11 @@ void HeadlessNavStatusHandler::onTurnEvent(
 
     std::cerr << "[aasdk] nav turn: " << maneuver << " road=" << last_road_ << std::endl;
 
-    // Send combined nav_state to app
+    // Send combined nav_state to app (include image on turn events)
     if (oal_session_) {
         oal_session_->send_nav_state(last_maneuver_, last_distance_m_,
-                                     last_road_, last_eta_s_);
+                                     last_road_, last_eta_s_,
+                                     last_nav_image_base64_);
     }
 
     channel_->receive(shared_from_this());
@@ -2716,6 +2729,7 @@ void HeadlessNavStatusHandler::onDistanceEvent(
     std::cerr << "[aasdk] nav distance: " << last_distance_m_ << "m, "
               << last_eta_s_ << "s" << std::endl;
 
+    // Distance-only updates omit the image to save bandwidth
     if (oal_session_) {
         oal_session_->send_nav_state(last_maneuver_, last_distance_m_,
                                      last_road_, last_eta_s_);

@@ -1,0 +1,43 @@
+package com.openautolink.app.cluster
+
+import com.openautolink.app.navigation.ManeuverState
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
+/**
+ * Shared navigation state for cluster sessions.
+ *
+ * Singleton — populated by SessionManager when nav_state arrives from the bridge.
+ * Consumed by [ClusterMainSession] to relay Trip data via NavigationManager.
+ *
+ * Separate from NavigationDisplay (which is per-session) because the cluster service
+ * runs in its own process/session lifecycle independent of the main activity.
+ */
+object ClusterNavigationState {
+
+    private val _state = MutableStateFlow<ManeuverState?>(null)
+    val state: StateFlow<ManeuverState?> = _state.asStateFlow()
+
+    /** True when navigation is actively routing. */
+    val isActive: Boolean get() = _state.value != null
+
+    fun update(maneuver: ManeuverState) {
+        _state.value = maneuver
+    }
+
+    fun clear() {
+        _state.value = null
+    }
+}
+
+/**
+ * Tracks whether a live ClusterMainSession exists.
+ *
+ * Used by the activity to know whether it needs to re-launch CarAppActivity
+ * to re-establish the Templates Host binding chain after teardown.
+ */
+object ClusterBindingState {
+    @Volatile
+    var sessionAlive = false
+}

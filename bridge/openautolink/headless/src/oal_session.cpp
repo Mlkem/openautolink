@@ -294,12 +294,17 @@ void OalSession::send_mic_stop() {
 }
 
 void OalSession::send_nav_state(const std::string& maneuver, int distance_m,
-                                 const std::string& road, int eta_s) {
+                                 const std::string& road, int eta_s,
+                                 const std::string& nav_image_base64) {
     std::ostringstream oss;
     oss << R"({"type":"nav_state","maneuver":")" << oal_json_escape(maneuver)
         << R"(","distance_meters":)" << distance_m
         << R"(,"road":")" << oal_json_escape(road)
-        << R"(","eta_seconds":)" << eta_s << "}";
+        << R"(","eta_seconds":)" << eta_s;
+    if (!nav_image_base64.empty()) {
+        oss << R"(,"nav_image_base64":")" << nav_image_base64 << R"(")";
+    }
+    oss << "}";
     send_control_line(oss.str());
 }
 

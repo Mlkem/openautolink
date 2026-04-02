@@ -512,6 +512,7 @@ private:
     // Cached nav state for composing full updates
     std::string last_road_;
     std::string last_maneuver_;
+    std::string last_nav_image_base64_;
     int last_distance_m_ = 0;
     int last_eta_s_ = 0;
 };

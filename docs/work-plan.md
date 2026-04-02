@@ -167,24 +167,22 @@ Enable OTA-style self-updating so new builds can be deployed without AAB/Play St
 - [x] Navigation state display + maneuver icons
 
 ### M8: Cluster Display
-- [ ] Cluster `CarAppService` + `ClusterMainSession` (GM path: `NavigationManager.updateTrip()` relay)
-- [ ] `CarlinkClusterSession` fallback (standard AAOS path: direct `NavigationTemplate` rendering)
-- [ ] Cluster navigation: `Maneuver.TYPE_*` enums + distance + road name via `Trip` builder
-- [ ] `MediaBrowserService` + `MediaSession` for cluster media: album artwork, track info
-- [ ] Bridge → app: `album_art_base64` field in `media_metadata` control message
-- [ ] `ClusterIconShimProvider` for Templates Host icon caching (GM-specific workaround)
-- [ ] Handle GM restrictions (third-party cluster services may be killed — detect and recover)
-- [ ] Fallback rendering if cluster service is blocked
-- [ ] `ClusterBindingState` tracking + auto-relaunch after teardown
-
-**Deferred — M8b: Full-Featured Nav Icons**
-- [ ] Bridge: configure aasdk `NavigationStatusService` with `InstrumentClusterType::IMAGE` (currently uses `ENUM`) + set `image_options` (width, height, colour_depth_bits)
-- [ ] Bridge: handle `NavigationState` proto (newer API) in addition to legacy `NavigationNextTurnEvent`/`NavigationNextTurnDistanceEvent` — the `NavigationState` proto carries `NavigationManeuver` with richer type enum (42 types vs legacy's 20)
-- [ ] Bridge: forward maneuver icon PNG bytes from aasdk to app via new `nav_image_base64` field in `nav_state` control message (or dedicated binary message on control channel)
-- [ ] App: when `nav_image_base64` present, use `Maneuver.TYPE_UNKNOWN` + `CarIcon.Builder(IconCompat.createWithBitmap(...))` — AA icon is source of truth (pre-rendered by Google Maps with exact angle/lane data)
-- [ ] App: fall back to `Maneuver.TYPE_*` enum mapping when no image available (CarPlay path, or older bridge)
-- [ ] Consider bundling VectorDrawable icon set (54 drawables, `cp_maneuver_00` through `cp_maneuver_53`) as CarPlay/offline fallback — reference: `carlink_native` `ManeuverIconRenderer.kt`
-- [ ] Reference commits: `carlink_native` `7e20b7a` (AA Nav Icon Use), `9ccd3ff` (AA Cluster Test), `1a17840` (AA Album Art Fix)
+- [x] Cluster `CarAppService` + `ClusterMainSession` (GM path: `NavigationManager.updateTrip()` relay)
+- [x] `OalClusterSession` fallback (standard AAOS path: direct `NavigationTemplate` rendering with `RoutingInfo`)
+- [x] Cluster navigation: `Maneuver.TYPE_*` enums + distance + road name via `Trip` builder
+- [x] `MediaBrowserService` + `MediaSession` for cluster media: album artwork, track info
+- [x] Bridge → app: `album_art_base64` field in `media_metadata` control message
+- [x] `ClusterIconShimProvider` for Templates Host icon caching (GM-specific workaround)
+- [x] Handle GM restrictions: `ClusterManager` detects session death via `ClusterBindingState.sessionAlive`, re-launches `CarAppActivity` binding chain with backoff
+- [x] Fallback rendering if cluster service is blocked: `launchClusterBinding()` catches and suppresses failures, cluster degrades silently while `MediaSession` continues
+- [x] `ClusterBindingState` tracking + auto-relaunch after teardown
+- [x] Bridge: aasdk `NavigationStatusService` configured with `InstrumentClusterType::IMAGE` + `image_options` (256×256, 32-bit)
+- [x] Bridge: aasdk `NavigationStatusService` extended with `onNavigationState()` + `onCurrentPosition()` handlers for `NavigationState` proto (msg 32774) and `NavigationCurrentPosition` (msg 32775) — 42 maneuver types
+- [x] Bridge: forward maneuver icon PNG bytes from `NavigationNextTurnEvent.image` (IMAGE mode) → base64-encode → `nav_image_base64` field in `nav_state` control message
+- [x] App: when `nav_image_base64` present, use `Maneuver.TYPE_UNKNOWN` + `CarIcon.Builder(IconCompat.createWithBitmap(...))` — AA icon is source of truth
+- [x] App: fall back to `Maneuver.TYPE_*` enum mapping + bundled VectorDrawable icon when no image available
+- [x] Bundled VectorDrawable icon set (44 drawables from CarPlay `cp_maneuver_*` set) + `ManeuverIconRenderer` mapping `ManeuverType` → drawable resource
+- [x] `ClusterManager` utility: enables/disables CarAppService component, launches/restarts cluster binding, handles teardown recovery
 
 ### M9: Steering Wheel Controls
 - [x] Media button mapping: skip forward, skip back, play/pause via `KeyEvent` interception
@@ -199,6 +197,100 @@ Enable OTA-style self-updating so new builds can be deployed without AAB/Play St
 - [x] Overlay buttons (settings, stats) — pulled forward, draggable floating buttons
 - [x] App icon and logo — adaptive icon from brand asset
 - [x] Stats for nerds overlay — monospace panel with session/video stats
+
+### M11: Remote Diagnostics (Car Testing Enabler)
+
+**Purpose:** Since GM AAOS has no ADB access, we need a way to observe app behavior in real-time on the car. The app sends structured logs and periodic telemetry back to the bridge over the existing control channel (port 5288). The bridge writes them to stderr, visible via `journalctl` over SSH.
+
+This unblocks all car-specific validation items listed in the Car Testing Unknowns section below.
+
+**App Side:**
+- [ ] `diagnostics/` island: `RemoteDiagnostics` interface + `RemoteDiagnosticsImpl`
+- [ ] `app_log` message type: structured log events with `ts`, `level`, `tag`, `msg`
+- [ ] `app_telemetry` message type: periodic (5s) snapshot of video/audio/session/cluster stats
+- [ ] Rate limiter: max 20 log messages/second (ring buffer, newest wins)
+- [ ] DataStore preference: remote diagnostics enabled (default: off)
+- [ ] DataStore preference: minimum log level to send (default: INFO)
+- [ ] Settings UI: toggle + log level selector in diagnostics tab
+- [ ] Instrument key subsystems with diagnostic log points:
+  - `video`: codec selection, codec reset, first frame timing, decode errors
+  - `audio`: AudioTrack creation, underruns, purpose routing, focus changes
+  - `cluster`: bind/unbind events, GM kill detection, rebind attempts
+  - `vhal`: property availability per-property, subscription errors
+  - `update`: self-update permission check result, install session outcome
+  - `input`: key event interception success/failure (voice button, media keys)
+  - `transport`: connection timing, reconnect events, channel failures
+  - `system`: Android version, SoC, display metrics (sent once on connect)
+- [ ] Add `app_log` and `app_telemetry` to `ControlMessageSerializer` (app→bridge direction)
+
+**Bridge Side:**
+- [ ] Handle `app_log` in `on_app_json_line()`: write to stderr with `[CAR]` prefix + level + tag
+- [ ] Handle `app_telemetry` in `on_app_json_line()`: write to stderr with `[CAR] TELEM` prefix
+- [ ] Both types are fire-and-forget — no response, no parsing beyond prefix formatting
+
+**Protocol:** See [docs/protocol.md](protocol.md) → Remote Diagnostics Channel section.
+
+---
+
+## 🚗 Car Testing Unknowns (GM AAOS)
+
+These items can only be validated on the actual GM head unit. No emulator can answer them. Remote diagnostics (M11) is the primary tool for investigating each one — the app logs relevant events, and we observe via SSH on the bridge.
+
+### Self-Update (M6b)
+| Unknown | How to test | What to log |
+|---------|------------|-------------|
+| Can AAOS install APKs from non-system sources? | Trigger self-update on car, observe PackageInstaller result | `tag=update`: permission check, session create, install result, error code if rejected |
+| Does GM restrict `REQUEST_INSTALL_PACKAGES`? | Check at runtime, log the permission state | `tag=update`: `checkSelfPermission` result, any GM-specific denial |
+| Fallback plan if blocked | Sideload via USB OTG with file manager, or pre-signed system image | Log the specific error code so we can research GM's restriction |
+
+### Cluster Service (M8)
+| Unknown | How to test | What to log |
+|---------|------------|-------------|
+| Does GM kill third-party cluster services? | Deploy app, bind cluster, monitor lifetime | `tag=cluster`: bind time, alive duration, destroy event, reason if available |
+| How long does it stay alive before kill? | Timestamp bind vs destroy, compute delta | `tag=cluster`: `ClusterMainSession created`, `destroyed after Nms` |
+| Does GM's Templates Host work with our `NavigationTemplate`? | Send nav state, check cluster display | `tag=cluster`: `Trip.Builder` success/failure, any `RemoteException` |
+| `ClusterIconShimProvider` — does GM query it? | Deploy, log `ContentProvider.query()` calls | `tag=cluster`: query events with URI and caller package |
+| Is re-binding after kill effective? | Track rebind count over a drive session | `tag=cluster`: `rebind attempt #N`, success/failure |
+| Fallback if cluster is fully blocked | No cluster display — degrade gracefully, hide cluster settings | Log final determination so we can document for users |
+
+### Steering Wheel Controls (M9)
+| Unknown | How to test | What to log |
+|---------|------------|-------------|
+| `KEYCODE_VOICE_ASSIST` interception feasibility | Register `KeyEvent` handler, attempt intercept | `tag=input`: keycode received, intercepted=true/false, forwarded to AA |
+| Does GM route voice button to system assistant? | Press voice button, log what the app sees | `tag=input`: whether our app receives the event at all, or if system consumes it |
+| Accessibility service approach viable? | If `KeyEvent` interception fails, try `AccessibilityService` | `tag=input`: accessibility service bind result, events received |
+| Media button reliability | Press all steering wheel buttons, log each | `tag=input`: per-keycode: received, forwarded, acknowledged by bridge |
+
+### Video/Audio on Real Hardware
+| Unknown | How to test | What to log |
+|---------|------------|-------------|
+| Actual FPS sustained on car | Run projection, observe telemetry | `app_telemetry`: fps field (rolling average), dropped frame count |
+| H.265 vs H.264 performance | Toggle codec in settings, compare fps/drops | `tag=video`: codec selected, first frame timing, steady-state fps |
+| Audio latency perception | Drive with nav + media, subjective evaluation | `tag=audio`: first audio frame timing, underrun counts |
+| First-frame time (cold start) | Kill app, relaunch, measure connection→first render | `tag=video`: timestamps at connect, codec config, first IDR, first render |
+| Reconnect quality (car off/on) | Turn car off, back on, observe reconnect | `tag=transport`: disconnect detected, reconnect attempts, success time; `tag=video`: first IDR after reconnect |
+
+### VHAL Properties
+| Unknown | How to test | What to log |
+|---------|------------|-------------|
+| Which of the 37 properties are available on GM? | Subscribe all, log success/failure per property | `tag=vhal`: per-property availability result, any exceptions |
+| Property value format/range on GM | Log actual values from car sensors | `tag=vhal`: sample values for speed, gear, turn signals, battery |
+| Does GM restrict `CarPropertyManager` for third-party apps? | Attempt subscription, log any security exceptions | `tag=vhal`: `SecurityException` or `IllegalArgumentException` per property |
+
+### Network
+| Unknown | How to test | What to log |
+|---------|------------|-------------|
+| USB Ethernet speed (100Mbps or gigabit?) | Log link speed if available via `ConnectivityManager` | `tag=system`: link speed, interface name |
+| Is 192.168.222.108 always assigned? | Check assigned IP on car | `tag=system`: IP address on USB NIC |
+| Any firewall/iptables rules blocking our ports? | Connection success/failure timing | `tag=transport`: per-port connect latency, timeout vs refused vs success |
+
+### Testing Workflow
+1. Build APK with remote diagnostics enabled by default for car testing builds
+2. Install on car (sideload or self-update if it works)
+3. SSH to bridge: `journalctl -u openautolink.service -f | grep '\[CAR\]'`
+4. Use the car normally — diagnostics stream in real time
+5. After session: `journalctl -u openautolink.service --since "1 hour ago" | grep '\[CAR\]' > car-session.log`
+6. Review logs, update this section with findings, check off unknowns as resolved
 
 ---
 

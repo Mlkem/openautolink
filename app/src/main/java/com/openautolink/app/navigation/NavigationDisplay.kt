@@ -26,7 +26,8 @@ data class ManeuverState(
     val distanceMeters: Int?,
     val formattedDistance: String,
     val roadName: String?,
-    val etaSeconds: Int?
+    val etaSeconds: Int?,
+    val navImageBase64: String? = null
 )
 
 /**

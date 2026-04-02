@@ -104,6 +104,9 @@ class SessionManager(
     // Media session — publishes now-playing to AAOS system UI + cluster
     private var _mediaSessionManager: OalMediaSessionManager? = null
 
+    // Cluster manager — lifecycle for cluster CarAppService binding
+    private var _clusterManager: com.openautolink.app.cluster.ClusterManager? = null
+
     private var observeJob: Job? = null
     private var videoCollectJob: Job? = null
     private var audioCollectJob: Job? = null
@@ -152,6 +155,12 @@ class SessionManager(
         _mediaSessionManager?.getSessionToken()?.let { token ->
             OalMediaBrowserService.updateSessionToken(token)
         }
+
+        // Enable and launch cluster service binding
+        _clusterManager?.release()
+        _clusterManager = context?.let { com.openautolink.app.cluster.ClusterManager(it) }
+        _clusterManager?.setClusterEnabled(true)
+        _clusterManager?.launchClusterBinding()
 
         observeJob = scope.launch {
             // Observe connection state changes
@@ -241,6 +250,8 @@ class SessionManager(
         ClusterNavigationState.clear()
         _mediaSessionManager?.release()
         _mediaSessionManager = null
+        _clusterManager?.release()
+        _clusterManager = null
         _sessionState.value = SessionState.IDLE
         _statusMessage.value = "Disconnected"
         _bridgeInfo.value = null

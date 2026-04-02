@@ -90,7 +90,8 @@ public:
     void send_mic_start(uint16_t sample_rate = 16000);
     void send_mic_stop();
     void send_nav_state(const std::string& maneuver, int distance_m,
-                        const std::string& road, int eta_s);
+                        const std::string& road, int eta_s,
+                        const std::string& nav_image_base64 = "");
     void send_media_metadata(const std::string& title, const std::string& artist,
                              const std::string& album, int duration_ms, int position_ms, bool playing,
                              const std::string& album_art_base64 = "");

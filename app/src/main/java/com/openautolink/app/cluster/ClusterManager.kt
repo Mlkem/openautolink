@@ -1,0 +1,143 @@
+package com.openautolink.app.cluster
+
+import android.app.ActivityManager
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+
+/**
+ * Manages the cluster service lifecycle: enabling/disabling the CarAppService component,
+ * launching CarAppActivity to trigger Templates Host binding, and recovering from
+ * GM killing the cluster session.
+ *
+ * GM AAOS may kill third-party CarAppService sessions. This manager detects when the
+ * session dies (via [ClusterBindingState.sessionAlive]) and re-launches the binding chain.
+ */
+class ClusterManager(private val context: Context) {
+
+    companion object {
+        private const val TAG = "ClusterMgr"
+        private const val CLUSTER_SERVICE_CLASS = "com.openautolink.app.cluster.OalClusterService"
+        private const val CAR_APP_ACTIVITY_CLASS = "androidx.car.app.activity.CarAppActivity"
+        private const val RELAUNCH_DELAY_MS = 2000L
+        private const val RETRY_DELAY_MS = 4000L
+        private const val BRING_BACK_DELAY_MS = 1000L
+    }
+
+    private val handler = Handler(Looper.getMainLooper())
+    private var enabled = false
+
+    /**
+     * Enable or disable the cluster CarAppService component.
+     * Must be called early in Activity.onCreate() before Templates Host discovers it.
+     */
+    fun setClusterEnabled(enabled: Boolean) {
+        this.enabled = enabled
+        val newState = if (enabled) {
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+        } else {
+            PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+        }
+        try {
+            context.packageManager.setComponentEnabledSetting(
+                ComponentName(context, CLUSTER_SERVICE_CLASS),
+                newState,
+                PackageManager.DONT_KILL_APP
+            )
+            Log.i(TAG, "Cluster service ${if (enabled) "enabled" else "disabled"}")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to set cluster component state: ${e.message}")
+        }
+    }
+
+    /**
+     * Launch CarAppActivity to trigger Templates Host binding for the cluster.
+     * Uses a separate task (taskAffinity) so it doesn't disturb the main activity.
+     *
+     * Guarded by [ClusterBindingState.sessionAlive] — if a session is already alive,
+     * waits for teardown before retrying.
+     *
+     * Brings the main activity back to front after binding completes (1s delay).
+     */
+    fun launchClusterBinding() {
+        if (!enabled) {
+            Log.d(TAG, "Cluster not enabled — skipping launch")
+            return
+        }
+
+        if (ClusterBindingState.sessionAlive) {
+            Log.i(TAG, "Session still alive — will retry after teardown")
+            handler.postDelayed({
+                if (!ClusterBindingState.sessionAlive) {
+                    Log.i(TAG, "Old session torn down — retrying launch")
+                    launchClusterBinding()
+                }
+            }, RETRY_DELAY_MS)
+            return
+        }
+
+        try {
+            val intent = Intent().apply {
+                setClassName(context, CAR_APP_ACTIVITY_CLASS)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION
+            }
+            context.startActivity(intent)
+            Log.i(TAG, "Launched CarAppActivity for Templates Host binding")
+
+            // Bring main activity back — binding is IPC-based, doesn't need foreground
+            handler.postDelayed({
+                try {
+                    val bringBack = Intent(context, context.javaClass).apply {
+                        flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NO_ANIMATION
+                    }
+                    context.startActivity(bringBack)
+                    Log.i(TAG, "Brought main activity back to foreground")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to bring main activity back: ${e.message}")
+                }
+            }, BRING_BACK_DELAY_MS)
+        } catch (e: Exception) {
+            // Cluster service blocked or not available — graceful degradation
+            Log.w(TAG, "Failed to launch CarAppActivity: ${e.message}")
+            Log.i(TAG, "Cluster navigation will not be available — media metadata still flows via MediaSession")
+        }
+    }
+
+    /**
+     * Tear down and re-establish the cluster binding chain.
+     * Called when the cluster session is detected as dead, or when nav state needs reset.
+     */
+    fun restartClusterBinding() {
+        Log.w(TAG, "Restarting cluster binding chain")
+        ClusterNavigationState.clear()
+
+        // Find and finish the CarAppActivity task
+        try {
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            for (appTask in am.appTasks) {
+                if (appTask.taskInfo.baseActivity?.className == CAR_APP_ACTIVITY_CLASS) {
+                    Log.i(TAG, "Finishing CarAppActivity task")
+                    appTask.finishAndRemoveTask()
+                    break
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to finish CarAppActivity task: ${e.message}")
+        }
+
+        handler.postDelayed({
+            launchClusterBinding()
+        }, RELAUNCH_DELAY_MS)
+    }
+
+    /**
+     * Stop monitoring and release handler callbacks.
+     */
+    fun release() {
+        handler.removeCallbacksAndMessages(null)
+    }
+}
