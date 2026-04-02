@@ -3,6 +3,7 @@
 import com.openautolink.app.audio.AudioFrame
 import com.openautolink.app.video.VideoFrame
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -438,6 +439,142 @@ class TransportIntegrationTest {
             assertNotNull("Server should have received hello (from AppHello)", received)
         } finally {
             channel.close()
+        }
+    }
+
+    // ── Mic audio send test ──────────────────────────────────────────
+
+    @Test(timeout = 10_000)
+    fun `audio channel sends mic frame to bridge`() = runBlocking {
+        val channel = TcpAudioChannel()
+        try {
+            withContext(Dispatchers.IO) {
+                channel.connect("127.0.0.1", server.audioPort)
+            }
+            assertTrue(server.awaitAudioConnected())
+
+            // Send a mic frame (direction=1, purpose=ASSISTANT, 16kHz mono)
+            val micPcm = ByteArray(640) { (it % 64).toByte() }
+            val micFrame = AudioFrame(
+                AudioFrame.DIRECTION_MIC,
+                AudioPurpose.ASSISTANT,
+                16000,
+                1,
+                micPcm
+            )
+            channel.sendFrame(micFrame)
+
+            // Verify server received it
+            val received = server.awaitReceivedAudioFrame()
+            assertNotNull("Server should have received mic frame", received)
+            assertEquals(AudioFrame.DIRECTION_MIC, received!!.direction)
+            assertEquals(AudioPurpose.ASSISTANT, received.purpose)
+            assertEquals(16000, received.sampleRate)
+            assertEquals(1, received.channels)
+            assertEquals(640, received.data.size)
+            assertArrayEquals(micPcm, received.data)
+        } finally {
+            channel.close()
+        }
+    }
+
+    @Test(timeout = 10_000)
+    fun `audio channel sends phone call mic frame`() = runBlocking {
+        val channel = TcpAudioChannel()
+        try {
+            withContext(Dispatchers.IO) {
+                channel.connect("127.0.0.1", server.audioPort)
+            }
+            assertTrue(server.awaitAudioConnected())
+
+            // Phone call mic: direction=1, purpose=PHONE_CALL, 8kHz mono
+            val micPcm = ByteArray(320) { 0x42 }
+            val micFrame = AudioFrame(
+                AudioFrame.DIRECTION_MIC,
+                AudioPurpose.PHONE_CALL,
+                8000,
+                1,
+                micPcm
+            )
+            channel.sendFrame(micFrame)
+
+            val received = server.awaitReceivedAudioFrame()
+            assertNotNull("Server should have received phone call mic frame", received)
+            assertEquals(AudioFrame.DIRECTION_MIC, received!!.direction)
+            assertEquals(AudioPurpose.PHONE_CALL, received.purpose)
+            assertEquals(8000, received.sampleRate)
+            assertEquals(1, received.channels)
+            assertEquals(320, received.data.size)
+        } finally {
+            channel.close()
+        }
+    }
+
+    // ── ConnectionManager reconnect test ─────────────────────────────
+
+    @Test(timeout = 15_000)
+    fun `ConnectionManager reconnects after control channel drops`() = runBlocking {
+        // ConnectionManager launches coroutines — needs its own scope on Dispatchers.IO
+        // to avoid blocking the runBlocking event loop
+        val ioScope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+        val connMgr = ConnectionManager(ioScope)
+
+        try {
+            // Connect to mock server
+            connMgr.connect("127.0.0.1", server.controlPort)
+
+            assertTrue("Should connect to control", server.awaitControlConnected(5000))
+
+            // Send hello so state transitions to CONNECTED
+            server.sendHello()
+
+            // Wait for CONNECTED state
+            withTimeout(5000) {
+                while (connMgr.connectionState.value != ConnectionState.CONNECTED) {
+                    kotlinx.coroutines.delay(50)
+                }
+            }
+            assertEquals(ConnectionState.CONNECTED, connMgr.connectionState.value)
+
+            // Record ports before stopping server
+            val ctlPort = server.controlPort
+            val vidPort = server.videoPort
+            val audPort = server.audioPort
+
+            // Drop the connection server-side
+            server.stop()
+
+            // Wait for DISCONNECTED state
+            withTimeout(5000) {
+                while (connMgr.connectionState.value != ConnectionState.DISCONNECTED) {
+                    kotlinx.coroutines.delay(50)
+                }
+            }
+            assertEquals(ConnectionState.DISCONNECTED, connMgr.connectionState.value)
+
+            // Start a new server on the SAME ports (simulating bridge restart)
+            val server2 = MockOalBridgeServer()
+            server2.startOnPorts(ctlPort, vidPort, audPort)
+
+            try {
+                // ConnectionManager should reconnect within backoff window
+                assertTrue("Should reconnect", server2.awaitControlConnected(10_000))
+
+                // Send hello again
+                server2.sendHello()
+
+                withTimeout(5000) {
+                    while (connMgr.connectionState.value != ConnectionState.CONNECTED) {
+                        kotlinx.coroutines.delay(50)
+                    }
+                }
+                assertEquals(ConnectionState.CONNECTED, connMgr.connectionState.value)
+            } finally {
+                server2.stop()
+            }
+        } finally {
+            connMgr.disconnect()
+            ioScope.cancel()
         }
     }
 

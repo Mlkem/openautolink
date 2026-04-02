@@ -16,6 +16,7 @@ Requires: Python 3.8+, ffmpeg (for synthetic video generation)
 """
 
 import argparse
+import base64
 import json
 import math
 import os
@@ -26,6 +27,7 @@ import subprocess
 import sys
 import threading
 import time
+import zlib
 
 # ── OAL Protocol Constants ───────────────────────────────────────────
 
@@ -45,6 +47,55 @@ AUDIO_PURPOSE_MEDIA = 0
 AUDIO_PURPOSE_NAV = 1
 AUDIO_SAMPLE_RATE = 48000
 AUDIO_CHANNELS = 2
+
+
+# ── Placeholder Image Generation ─────────────────────────────────────
+
+def generate_solid_png(width, height, r, g, b):
+    """Generate a minimal solid-color PNG as bytes. No external deps."""
+    def _chunk(chunk_type, data):
+        c = chunk_type + data
+        return struct.pack(">I", len(data)) + c + struct.pack(">I", zlib.crc32(c) & 0xFFFFFFFF)
+
+    ihdr_data = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)  # 8-bit RGB
+    raw_rows = b""
+    for _ in range(height):
+        raw_rows += b"\x00"  # filter byte
+        raw_rows += bytes([r, g, b]) * width
+    idat_data = zlib.compress(raw_rows)
+
+    png = b"\x89PNG\r\n\x1a\n"
+    png += _chunk(b"IHDR", ihdr_data)
+    png += _chunk(b"IDAT", idat_data)
+    png += _chunk(b"IEND", b"")
+    return png
+
+
+def generate_album_art_base64(track_idx):
+    """Generate a small colored square as album art placeholder."""
+    colors = [
+        (180, 30, 30),   # red
+        (30, 120, 180),  # blue
+        (80, 160, 40),   # green
+        (200, 150, 30),  # gold
+        (120, 40, 160),  # purple
+    ]
+    r, g, b = colors[track_idx % len(colors)]
+    png_bytes = generate_solid_png(64, 64, r, g, b)
+    return base64.b64encode(png_bytes).decode("ascii")
+
+
+def generate_nav_image_base64(maneuver):
+    """Generate a small colored arrow placeholder for nav maneuver."""
+    color_map = {
+        "turn_right": (30, 130, 230),
+        "turn_left": (30, 130, 230),
+        "straight": (60, 180, 60),
+        "destination": (220, 50, 50),
+    }
+    r, g, b = color_map.get(maneuver, (128, 128, 128))
+    png_bytes = generate_solid_png(48, 48, r, g, b)
+    return base64.b64encode(png_bytes).decode("ascii")
 
 
 # ── Video Generation ─────────────────────────────────────────────────
@@ -333,6 +384,7 @@ class ControlHandler:
         while not stop_event.is_set():
             track = self.FAKE_TRACKS[track_idx % len(self.FAKE_TRACKS)]
             position_ms = 0
+            album_art = generate_album_art_base64(track_idx)
             # Send initial metadata
             self._send(conn, {
                 "type": "media_metadata",
@@ -342,6 +394,7 @@ class ControlHandler:
                 "duration_ms": track["duration_ms"],
                 "position_ms": position_ms,
                 "playing": True,
+                "album_art_base64": album_art,
             })
             print(f"[control] Now playing: {track['artist']} - {track['title']}")
 
@@ -369,9 +422,11 @@ class ControlHandler:
         maneuver_idx = 0
         while not stop_event.is_set():
             maneuver = self.FAKE_MANEUVERS[maneuver_idx % len(self.FAKE_MANEUVERS)]
+            nav_image = generate_nav_image_base64(maneuver["maneuver"])
             self._send(conn, {
                 "type": "nav_state",
                 **maneuver,
+                "nav_image_base64": nav_image,
             })
             print(f"[control] Nav: {maneuver['maneuver']} in {maneuver['distance_meters']}m → {maneuver['road']}")
             maneuver_idx += 1

@@ -52,6 +52,37 @@ jobs:
           path: app/build/reports/tests/testDebugUnitTest/
           retention-days: 14
 
+  # ── Bridge C++ Build Verification (Stub Mode) ──────────────────
+  # Builds the bridge binary in stub mode (no aasdk) on x86 Linux.
+  # Verifies the C++ code compiles without ARM64 or aasdk dependencies.
+  bridge-build:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ build-essential
+
+      - name: Configure CMake (stub mode)
+        run: |
+          cmake -B build-stub \
+            -S bridge/openautolink/headless \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPI_AA_ENABLE_AASDK_LIVE=OFF
+
+      - name: Build
+        run: cmake --build build-stub -j$(nproc)
+
+      - name: Verify binary
+        run: |
+          test -f build-stub/openautolink-headless
+          file build-stub/openautolink-headless
+          echo "Bridge stub build OK"
+
   # ── Emulator Smoke Test ─────────────────────────────────────────
   # Boots AAOS emulator, installs APK, runs mock bridge, verifies app starts.
   # Runs on push to main only (emulator tests are slow and flaky on PRs).

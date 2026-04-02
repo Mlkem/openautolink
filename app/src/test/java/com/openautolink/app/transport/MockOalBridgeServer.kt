@@ -2,6 +2,7 @@ package com.openautolink.app.transport
 
 import com.openautolink.app.audio.AudioFrame
 import com.openautolink.app.video.VideoFrame
+import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.OutputStream
 import java.net.ServerSocket
@@ -51,10 +52,17 @@ class MockOalBridgeServer {
     val receivedControlLines = CopyOnWriteArrayList<String>()
     val receivedControlMessages = CopyOnWriteArrayList<ControlMessage>()
 
+    // Received audio frames from app (mic direction=1)
+    val receivedAudioFrames = CopyOnWriteArrayList<AudioFrame>()
+
     fun start() {
-        controlServer = ServerSocket(0)  // Ephemeral port
-        videoServer = ServerSocket(0)
-        audioServer = ServerSocket(0)
+        startOnPorts(0, 0, 0)  // Ephemeral ports
+    }
+
+    fun startOnPorts(controlPort: Int, videoPort: Int, audioPort: Int) {
+        controlServer = ServerSocket(controlPort)
+        videoServer = ServerSocket(videoPort)
+        audioServer = ServerSocket(audioPort)
         running.set(true)
 
         // Accept control connection
@@ -96,6 +104,23 @@ class MockOalBridgeServer {
                 audioClient = s
                 audioOut = DataOutputStream(s.getOutputStream())
                 audioConnected.countDown()
+
+                // Read mic audio frames from app (direction=1)
+                val input = DataInputStream(s.getInputStream().buffered(65536))
+                while (running.get() && !s.isClosed) {
+                    val hdr = ByteArray(8)
+                    input.readFully(hdr)
+                    val direction = hdr[0].toInt() and 0xFF
+                    val purposeByte = hdr[1].toInt() and 0xFF
+                    val sampleRate = (hdr[2].toInt() and 0xFF) or ((hdr[3].toInt() and 0xFF) shl 8)
+                    val channels = hdr[4].toInt() and 0xFF
+                    val payloadLength = (hdr[5].toInt() and 0xFF) or
+                            ((hdr[6].toInt() and 0xFF) shl 8) or
+                            ((hdr[7].toInt() and 0xFF) shl 16)
+                    val payload = if (payloadLength > 0) ByteArray(payloadLength).also { input.readFully(it) } else ByteArray(0)
+                    val purpose = AudioFrame.purposeFromByte(purposeByte) ?: continue
+                    receivedAudioFrames.add(AudioFrame(direction, purpose, sampleRate, channels, payload))
+                }
             } catch (_: Exception) {}
         }, "mock-audio-accept").also { it.isDaemon = true; it.start() }
     }
@@ -255,6 +280,16 @@ class MockOalBridgeServer {
 
     fun awaitAudioConnected(timeoutMs: Long = 3000): Boolean =
         audioConnected.await(timeoutMs, TimeUnit.MILLISECONDS)
+
+    fun awaitReceivedAudioFrame(timeoutMs: Long = 3000): AudioFrame? {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val found = receivedAudioFrames.firstOrNull()
+            if (found != null) return found
+            Thread.sleep(50)
+        }
+        return null
+    }
 
     fun awaitReceivedMessage(
         type: Class<out ControlMessage>,

@@ -4,6 +4,8 @@
 
 # OpenAutoLink
 
+[![CI](https://github.com/mossyhub/openautolink/actions/workflows/ci.yml/badge.svg)](https://github.com/mossyhub/openautolink/actions/workflows/ci.yml)
+
 **An open-source wireless Android Auto bridge for AAOS head units.** An SBC handles the phone's Android Auto session over WiFi, then streams video, audio, and touch to an app on your car's display over Ethernet — no janky, closed-source and hacky USB adapter hardware required.
 
 - Wireless Android Auto — phone connects via Bluetooth + WiFi, no cables to the phone
@@ -15,7 +17,7 @@
 - One-command SBC install, auto-reconnect on car startup, OTA app updates
 - Fully open-source — app, bridge, protocol, and deployment scripts
 
-> **Fair warning:** This is a free, hobby project that is very much under active development. It might work great, it might not work at all. My goal is to eventually make it stable and production-quality, but it's not there yet — and honestly, it may never be. I'm building this because it's fun and because I want Android Auto back in my car. If that sounds like your kind of adventure, give it a try.
+> **Fair warning:** This is a free, hobby project that is very much under active development. It might work great, it might not work at all. Stated features may or may not actually work. My goal is to eventually make it stable and production-quality, but it's not there yet — and honestly, it may never be. I'm building this because it's fun and because I want Android Auto back in my car. If that sounds like your kind of adventure, give it a try.
 
 > **What about CarPlay?** Right now this is Android Auto only — my daily driver is an Android phone, so that's where the focus is. CarPlay support is something I'd like to explore once I'm happy enough with the AA experience. I have a modern iPhone to test with when the time comes, but no promises or timeline. I am only taking a somewhat educated guess that this will even be possible.
 

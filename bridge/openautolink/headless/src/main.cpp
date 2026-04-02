@@ -184,15 +184,16 @@ int main(int argc, char* argv[])
         });
         video_thread.detach();
 
-        // Audio transport: bidirectional
-        std::thread audio_thread([&tcp_audio, &oal]() {
+        // Audio transport: bidirectional — flush writes + read mic frames
+        std::thread audio_thread([&tcp_audio, &oal, &mock]() {
             std::cerr << "[main] audio TCP (mock) listening" << std::endl;
             tcp_audio.run_oal_audio(
                 []() { std::cerr << "[main] audio client connected (mock)" << std::endl; },
                 [&oal]() -> bool { return oal.flush_one_audio(); },
-                [&oal](const openautolink::OalAudioHeader& hdr,
+                [&oal, &mock](const openautolink::OalAudioHeader& hdr,
                        const uint8_t* pcm, size_t len) {
                     oal.on_app_audio_frame(hdr, pcm, len);
+                    mock.on_mic_audio(hdr, pcm, len);
                 }
             );
         });
@@ -204,8 +205,12 @@ int main(int argc, char* argv[])
         // Control transport: blocking accept + JSON line loop
         std::cerr << "[main] starting OAL mock control loop on port " << tcp_car_port << std::endl;
         tcp_control.run_oal_control(
-            [&oal](const std::string& line) {
+            [&oal, &mock](const std::string& line) {
                 oal.on_app_json_line(line);
+                // Route keyframe requests to mock session
+                if (line.find("keyframe_request") != std::string::npos) {
+                    mock.on_keyframe_request();
+                }
             },
             [&oal, &mock]() {
                 oal.on_app_connected();

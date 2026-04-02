@@ -60,14 +60,29 @@ public:
     /// Called by the TCP control thread when the app connects.
     void on_app_connected() {
         app_connected_.store(true);
-        // Simulate phone connecting after a short delay
-        // (control_loop will pick this up)
     }
 
     void on_app_disconnected() {
         app_connected_.store(false);
         phone_announced_.store(false);
     }
+
+    /// Called when a keyframe_request is received from the app.
+    /// Re-sends SPS/PPS + IDR immediately so the app can reset its decoder.
+    void on_keyframe_request() {
+        keyframe_requested_.store(true);
+    }
+
+    /// Called when mic audio is received from the app (direction=1).
+    /// In echo mode, loops it back as media playback for testing.
+    void on_mic_audio(const OalAudioHeader& hdr, const uint8_t* pcm, size_t len) {
+        if (!mic_echo_enabled_.load()) return;
+        // Echo mic audio back as media playback (direction=0, purpose=MEDIA)
+        oal_.write_audio_frame(pcm, len,
+            OalAudioPurpose::MEDIA, hdr.sample_rate, hdr.channels);
+    }
+
+    void set_mic_echo(bool enabled) { mic_echo_enabled_.store(enabled); }
 
 private:
     // ── Video generation ─────────────────────────────────────────────
@@ -137,6 +152,16 @@ private:
 
             // IDR or P-frame
             bool is_idr = (frame_count % idr_interval == 0);
+
+            // Handle keyframe request — force IDR + re-send config
+            if (keyframe_requested_.exchange(false)) {
+                oal_.write_video_frame(width, height, pts_ms,
+                    OalVideoFlags::CODEC_CONFIG,
+                    sps_pps, sizeof(sps_pps));
+                is_idr = true;
+                std::cerr << "[mock] keyframe requested — re-sent config + IDR" << std::endl;
+            }
+
             uint16_t flags = is_idr ? OalVideoFlags::KEYFRAME : 0;
 
             auto frame_data = is_idr
@@ -298,6 +323,8 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> app_connected_{false};
     std::atomic<bool> phone_announced_{false};
+    std::atomic<bool> keyframe_requested_{false};
+    std::atomic<bool> mic_echo_enabled_{false};
 
     std::thread video_thread_;
     std::thread audio_thread_;
