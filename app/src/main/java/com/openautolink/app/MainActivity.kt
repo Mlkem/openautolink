@@ -1,6 +1,7 @@
 package com.openautolink.app
 
 import android.os.Bundle
+import android.util.Log
 import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -52,6 +53,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun applyDisplayMode(mode: String) {
+        Log.i("MainActivity", "applyDisplayMode: $mode")
         val controller = WindowCompat.getInsetsController(window, window.decorView)
 
         when (mode) {

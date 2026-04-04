@@ -16,8 +16,10 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -75,7 +77,15 @@ fun ProjectionScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .windowInsetsPadding(WindowInsets.systemBars)
+            .then(
+                // Only apply system bar insets when bars are visible
+                when (uiState.displayMode) {
+                    "system_ui_visible" -> Modifier.windowInsetsPadding(WindowInsets.systemBars)
+                    "status_bar_hidden" -> Modifier.windowInsetsPadding(WindowInsets.navigationBars)
+                    "nav_bar_hidden" -> Modifier.windowInsetsPadding(WindowInsets.statusBars)
+                    else -> Modifier // fullscreen_immersive, custom_viewport — no insets
+                }
+            )
             .testTag("projectionScreen")
     ) {
         // Compute SurfaceView modifier based on display mode
