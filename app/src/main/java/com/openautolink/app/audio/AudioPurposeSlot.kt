@@ -184,32 +184,37 @@ class AudioPurposeSlot(
         val track = audioTrack ?: return
         val ring = ringBuffer ?: return
         val bytesPerSample = 2
-        // Write 10ms chunks — small enough to avoid blocking too long,
-        // large enough to avoid excessive syscall overhead
         val chunkMs = 10
         val chunkBytes = sampleRate * channelCount * bytesPerSample * chunkMs / 1000
         val chunk = ByteArray(chunkBytes)
 
         while (active.get()) {
             val available = ring.available
-            if (available >= chunkBytes) {
-                val read = ring.read(chunk)
+            if (available > 0) {
+                val toRead = minOf(available, chunkBytes)
+                val read = ring.read(chunk, 0, toRead)
                 if (read > 0) {
-                    // Blocking write — AudioTrack paces us to real-time.
-                    // This is the same approach stagefright uses (zero HAL errors).
-                    track.write(chunk, 0, read)
-                    framesWritten.addAndGet(read.toLong() / (channelCount * bytesPerSample))
-                }
-            } else if (available > 0) {
-                // Partial chunk — write what we have
-                val partial = ByteArray(available)
-                val read = ring.read(partial)
-                if (read > 0) {
-                    track.write(partial, 0, read)
-                    framesWritten.addAndGet(read.toLong() / (channelCount * bytesPerSample))
+                    // Non-blocking write to avoid stalling AudioFlinger mixer.
+                    // If AudioTrack buffer is full, written=0 and we retry next loop.
+                    var offset = 0
+                    var retries = 0
+                    while (offset < read && active.get()) {
+                        val written = track.write(chunk, offset, read - offset,
+                            AudioTrack.WRITE_NON_BLOCKING)
+                        if (written > 0) {
+                            offset += written
+                            framesWritten.addAndGet(written.toLong() / (channelCount * bytesPerSample))
+                            retries = 0
+                        } else {
+                            // AudioTrack buffer full — wait for it to drain a bit
+                            retries++
+                            if (retries > 50) break // Give up after ~50ms, data is stale
+                            Thread.sleep(1)
+                        }
+                    }
                 }
             } else {
-                // No data — brief sleep to avoid busy-wait
+                // Ring buffer empty — wait for data
                 underrunCount.incrementAndGet()
                 Thread.sleep(2)
             }
