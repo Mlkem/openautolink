@@ -62,7 +62,6 @@ fun ProjectionScreen(
     onNavigateToSettings: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val carplayPin by viewModel.carplayPin.collectAsStateWithLifecycle()
     val showPhoneSwitcher by viewModel.showPhoneSwitcher.collectAsStateWithLifecycle()
     val pairedPhones by viewModel.pairedPhones.collectAsStateWithLifecycle()
 
@@ -236,17 +235,6 @@ fun ProjectionScreen(
             )
         }
 
-        // CarPlay PIN overlay — shown when bridge sends carplay_pin during first-time pairing
-        carplayPin?.let { pin ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.85f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                com.openautolink.app.ui.carplay.CarPlayPinScreen(pin = pin)
-            }
-        }
     }
 }
 

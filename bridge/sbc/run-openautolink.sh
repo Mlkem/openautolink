@@ -22,8 +22,6 @@ ARGS=(
 # Session mode derived from phone protocol
 case "${OAL_PHONE_PROTOCOL:-android-auto}" in
     android-auto) ARGS+=(--session-mode=aasdk-live) ;;
-    carplay)      ARGS+=(--session-mode=carplay-live) ;;
-    auto)         ARGS+=(--session-mode=auto) ;;
     *)            ARGS+=(--session-mode=aasdk-live) ;;  # default to AA
 esac
 

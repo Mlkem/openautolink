@@ -289,9 +289,7 @@ void OalSession::send_hello() {
     oss << R"({"type":"hello","version":1,"name":")"
         << oal_json_escape(config_.head_unit_name)
         << R"(","capabilities":[)" << caps
-        << R"(],"video_port":5290,"audio_port":5289)"
-        << R"(,"carplay_supported":)" << (config_.carplay_supported ? "true" : "false")
-        << "}";
+        << R"(],"video_port":5290,"audio_port":5289})";
     send_control_line(oss.str());
     std::cerr << "[OAL] sent hello" << std::endl;
 }
@@ -445,13 +443,6 @@ void OalSession::send_phone_status(int signal_strength, const std::string& calls
     oss << R"({"type":"phone_status","signal_strength":)" << signal_strength
         << R"(,"calls":)" << calls_json << "}";
     send_control_line(oss.str());
-}
-
-void OalSession::send_carplay_pin(const std::string& pin) {
-    std::ostringstream oss;
-    oss << R"({"type":"carplay_pin","pin":")" << pin << R"("})";
-    send_control_line(oss.str());
-    std::cerr << "[OAL] sent carplay_pin" << std::endl;
 }
 
 // ── App → Bridge JSON dispatch ───────────────────────────────────────
@@ -918,7 +909,7 @@ void OalSession::handle_switch_phone(const std::string& json) {
     // Disconnect current phone first (if connected), then connect to target.
     // This runs asynchronously via bluetoothctl to avoid blocking the control thread.
     // The BT script's event handler will pick up the new connection and trigger
-    // the RFCOMM WiFi credential exchange, leading to a new AA/CarPlay session.
+    // the RFCOMM WiFi credential exchange, leading to a new AA session.
     std::string cmd = "( ";
 
     // Disconnect all currently connected devices
@@ -940,7 +931,7 @@ void OalSession::handle_switch_phone(const std::string& json) {
     }
 
     // Notify app that phone disconnected (the new connection will trigger
-    // a phone_connected message when the AA/CarPlay session starts)
+    // a phone_connected message when the AA session starts)
     if (phone_connected_) {
         on_phone_disconnected("phone_switch");
     }

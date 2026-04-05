@@ -603,7 +603,7 @@ private fun PhonesTab(viewModel: SettingsViewModel, uiState: SettingsUiState) {
 
         Text(
             text = "Phones paired with the bridge via Bluetooth. " +
-                    "Works with both Android Auto and CarPlay devices.",
+                    "Works with Android Auto devices.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 12.dp),

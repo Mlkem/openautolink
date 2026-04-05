@@ -43,8 +43,6 @@ enum class SessionMode {
     AasdkPlaceholder,
     AasdkLive,
     OalMock,       // Synthetic OAL data — no phone/aasdk needed
-    CarPlayLive,   // CarPlay only — iPhone via RTSP/AirPlay
-    Auto,          // Both AA + CarPlay, first phone to connect wins
 };
 
 class IAndroidAutoSession {

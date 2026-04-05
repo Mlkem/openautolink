@@ -79,12 +79,8 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
     private val _videoStats = MutableStateFlow(VideoStats())
     private val _audioStats = MutableStateFlow(AudioStats())
     private val _showStats = MutableStateFlow(false)
-    private val _carplayPin = MutableStateFlow<String?>(null)
     private val _pairedPhones = MutableStateFlow<List<com.openautolink.app.transport.ControlMessage.PairedPhone>>(emptyList())
     private val _showPhoneSwitcher = MutableStateFlow(false)
-
-    /** CarPlay pairing PIN — non-null when the bridge is waiting for iPhone PIN entry. */
-    val carplayPin: StateFlow<String?> = _carplayPin
 
     /** Paired phones list for the phone switcher popup. */
     val pairedPhones: StateFlow<List<com.openautolink.app.transport.ControlMessage.PairedPhone>> = _pairedPhones
@@ -152,10 +148,6 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
                     }
                     is com.openautolink.app.transport.ControlMessage.PhoneDisconnected -> {
                         _phoneName.value = null
-                        _carplayPin.value = null
-                    }
-                    is com.openautolink.app.transport.ControlMessage.CarPlayPin -> {
-                        _carplayPin.value = message.pin
                     }
                     is com.openautolink.app.transport.ControlMessage.PairedPhones -> {
                         _pairedPhones.value = message.phones

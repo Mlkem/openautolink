@@ -1447,12 +1447,6 @@ std::optional<SessionMode> parse_session_mode(std::string_view value)
     if(value == "oal-mock") {
         return SessionMode::OalMock;
     }
-    if(value == "carplay-live") {
-        return SessionMode::CarPlayLive;
-    }
-    if(value == "auto") {
-        return SessionMode::Auto;
-    }
     return std::nullopt;
 }
 

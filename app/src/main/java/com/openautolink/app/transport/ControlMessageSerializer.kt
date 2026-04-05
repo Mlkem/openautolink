@@ -32,8 +32,7 @@ object ControlMessageSerializer {
                 name = obj["name"]?.jsonPrimitive?.content ?: "",
                 capabilities = obj["capabilities"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
                 videoPort = obj["video_port"]?.jsonPrimitive?.content?.toIntOrNull() ?: 5290,
-                audioPort = obj["audio_port"]?.jsonPrimitive?.content?.toIntOrNull() ?: 5289,
-                carplaySupported = obj["carplay_supported"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false
+                audioPort = obj["audio_port"]?.jsonPrimitive?.content?.toIntOrNull() ?: 5289
             )
 
             "phone_connected" -> ControlMessage.PhoneConnected(
@@ -139,10 +138,6 @@ object ControlMessageSerializer {
 
             "voice_session" -> ControlMessage.VoiceSession(
                 started = obj["status"]?.jsonPrimitive?.content == "start"
-            )
-
-            "carplay_pin" -> ControlMessage.CarPlayPin(
-                pin = obj["pin"]?.jsonPrimitive?.content ?: ""
             )
 
             "phone_status" -> {
