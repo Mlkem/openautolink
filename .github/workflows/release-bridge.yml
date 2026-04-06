@@ -50,7 +50,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             g++-aarch64-linux-gnu \
+            gcc-aarch64-linux-gnu \
             cmake make git \
+            crossbuild-essential-arm64 \
             libboost-system-dev:arm64 \
             libboost-log-dev:arm64 \
             libboost-filesystem-dev:arm64 \
