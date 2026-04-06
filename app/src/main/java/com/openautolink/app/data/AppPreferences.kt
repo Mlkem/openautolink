@@ -85,7 +85,7 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
 
         const val DEFAULT_BRIDGE_HOST = "192.168.222.222"
         const val DEFAULT_BRIDGE_PORT = 5288
-        const val DEFAULT_VIDEO_CODEC = "h265"
+        const val DEFAULT_VIDEO_CODEC = "h264"
         const val DEFAULT_VIDEO_FPS = 60
         const val DEFAULT_DISPLAY_MODE = "system_ui_visible"
         const val DEFAULT_MIC_SOURCE = "car"

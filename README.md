@@ -141,6 +141,8 @@ Because this is an AAOS app (not a standard phone app), getting it onto your car
 
 9. **Install** — Once the invite is accepted, the app should appear on the Play Store on your car's head unit (may take a few hours to propagate). You can also trigger it by searching for your app name in the Play Store on the head unit
 
+10. **Grant the "Car Information" permission** — After installing, go to **Settings → Apps → OpenAutoLink → Permissions** on the head unit and manually enable the **"Car Information"** permission. This permission (used for vehicle speed, gear, fuel/EV range, etc.) cannot be granted automatically and must be enabled by the user through the system settings
+
 ### Run Tests
 ```powershell
 .\gradlew :app:testDebugUnitTest
