@@ -10,9 +10,6 @@ import com.openautolink.app.transport.ControlMessage
 import com.openautolink.app.transport.DiscoveredBridge
 import com.openautolink.app.transport.NetworkInterfaceInfo
 import com.openautolink.app.transport.NetworkInterfaceScanner
-import com.openautolink.app.update.AppInstaller
-import com.openautolink.app.update.UpdateChecker
-import com.openautolink.app.update.UpdateManifest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -28,8 +25,6 @@ data class SettingsUiState(
     val videoFps: Int = AppPreferences.DEFAULT_VIDEO_FPS,
     val displayMode: String = AppPreferences.DEFAULT_DISPLAY_MODE,
     val micSource: String = AppPreferences.DEFAULT_MIC_SOURCE,
-    val selfUpdateEnabled: String = AppPreferences.DEFAULT_SELF_UPDATE_ENABLED,
-    val updateManifestUrl: String = AppPreferences.DEFAULT_UPDATE_MANIFEST_URL,
     val networkInterface: String = AppPreferences.DEFAULT_NETWORK_INTERFACE,
     val remoteDiagnosticsEnabled: Boolean = AppPreferences.DEFAULT_REMOTE_DIAGNOSTICS_ENABLED,
     val remoteDiagnosticsMinLevel: String = AppPreferences.DEFAULT_REMOTE_DIAGNOSTICS_MIN_LEVEL,
@@ -73,25 +68,12 @@ data class SettingsUiState(
     val contentInsetRight: Int = AppPreferences.DEFAULT_CONTENT_INSET_RIGHT,
 )
 
-sealed class UpdateStatus {
-    data object Idle : UpdateStatus()
-    data object Checking : UpdateStatus()
-    data class UpdateAvailable(val manifest: UpdateManifest) : UpdateStatus()
-    data object UpToDate : UpdateStatus()
-    data class Downloading(val progress: Float) : UpdateStatus()
-    data object Installing : UpdateStatus()
-    data class Error(val message: String) : UpdateStatus()
-}
-
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
 
     private val preferences = AppPreferences.getInstance(application)
-    private val updateChecker = UpdateChecker(application)
-    private val appInstaller = AppInstaller(application)
     private val bridgeDiscovery = BridgeDiscovery(application)
     private val interfaceScanner = NetworkInterfaceScanner(application)
 
-    val updateStatus = MutableStateFlow<UpdateStatus>(UpdateStatus.Idle)
     val discoveredBridges: StateFlow<List<DiscoveredBridge>> = bridgeDiscovery.discoveredBridges
     val isDiscovering: StateFlow<Boolean> = bridgeDiscovery.isDiscovering
     val networkInterfaces: StateFlow<List<NetworkInterfaceInfo>> = interfaceScanner.interfaces
@@ -109,8 +91,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         preferences.videoFps,
         preferences.displayMode,
         preferences.micSource,
-        preferences.selfUpdateEnabled,
-        preferences.updateManifestUrl,
         preferences.networkInterface,
         preferences.remoteDiagnosticsEnabled,
         preferences.remoteDiagnosticsMinLevel,
@@ -154,43 +134,41 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             videoFps = values[3] as Int,
             displayMode = values[4] as String,
             micSource = values[5] as String,
-            selfUpdateEnabled = values[6] as String,
-            updateManifestUrl = values[7] as String,
-            networkInterface = values[8] as String,
-            remoteDiagnosticsEnabled = values[9] as Boolean,
-            remoteDiagnosticsMinLevel = values[10] as String,
-            aaResolution = values[11] as String,
-            aaDpi = values[12] as Int,
-            phoneMode = values[13] as String,
-            wifiBand = values[14] as String,
-            wifiCountry = values[15] as String,
-            wifiSsid = values[16] as String,
-            wifiPassword = values[17] as String,
-            headUnitName = values[18] as String,
-            btMac = values[19] as String,
-            driveSide = values[20] as String,
-            gpsForwarding = values[21] as Boolean,
-            clusterNavigation = values[22] as Boolean,
-            audioSource = values[23] as String,
-            callQuality = values[24] as String,
-            overlaySettingsButton = values[25] as Boolean,
-            overlayStatsButton = values[26] as Boolean,
-            overlayPhoneSwitchButton = values[27] as Boolean,
-            defaultPhoneMac = values[28] as String,
-            syncAaTheme = values[29] as Boolean,
-            hideAaClock = values[30] as Boolean,
-            sendImuSensors = values[31] as Boolean,
-            customViewportWidth = values[32] as Int,
-            customViewportHeight = values[33] as Int,
-            viewportAspectRatioLocked = values[34] as Boolean,
-            safeAreaTop = values[35] as Int,
-            safeAreaBottom = values[36] as Int,
-            safeAreaLeft = values[37] as Int,
-            safeAreaRight = values[38] as Int,
-            contentInsetTop = values[39] as Int,
-            contentInsetBottom = values[40] as Int,
-            contentInsetLeft = values[41] as Int,
-            contentInsetRight = values[42] as Int,
+            networkInterface = values[6] as String,
+            remoteDiagnosticsEnabled = values[7] as Boolean,
+            remoteDiagnosticsMinLevel = values[8] as String,
+            aaResolution = values[9] as String,
+            aaDpi = values[10] as Int,
+            phoneMode = values[11] as String,
+            wifiBand = values[12] as String,
+            wifiCountry = values[13] as String,
+            wifiSsid = values[14] as String,
+            wifiPassword = values[15] as String,
+            headUnitName = values[16] as String,
+            btMac = values[17] as String,
+            driveSide = values[18] as String,
+            gpsForwarding = values[19] as Boolean,
+            clusterNavigation = values[20] as Boolean,
+            audioSource = values[21] as String,
+            callQuality = values[22] as String,
+            overlaySettingsButton = values[23] as Boolean,
+            overlayStatsButton = values[24] as Boolean,
+            overlayPhoneSwitchButton = values[25] as Boolean,
+            defaultPhoneMac = values[26] as String,
+            syncAaTheme = values[27] as Boolean,
+            hideAaClock = values[28] as Boolean,
+            sendImuSensors = values[29] as Boolean,
+            customViewportWidth = values[30] as Int,
+            customViewportHeight = values[31] as Int,
+            viewportAspectRatioLocked = values[32] as Boolean,
+            safeAreaTop = values[33] as Int,
+            safeAreaBottom = values[34] as Int,
+            safeAreaLeft = values[35] as Int,
+            safeAreaRight = values[36] as Int,
+            contentInsetTop = values[37] as Int,
+            contentInsetBottom = values[38] as Int,
+            contentInsetLeft = values[39] as Int,
+            contentInsetRight = values[40] as Int,
         )
     }.stateIn(
         viewModelScope,
@@ -386,64 +364,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             preferences.setCustomViewportHeight(height)
         }
     }
-
-    fun updateSelfUpdateEnabled(enabled: String) {
-        viewModelScope.launch { preferences.setSelfUpdateEnabled(enabled) }
-    }
-
-    fun updateManifestUrl(url: String) {
-        viewModelScope.launch { preferences.setUpdateManifestUrl(url) }
-    }
-
-    fun checkForUpdate(manifestUrl: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            updateStatus.value = UpdateStatus.Checking
-            when (val result = updateChecker.checkForUpdate(manifestUrl)) {
-                is UpdateChecker.CheckResult.UpdateAvailable -> {
-                    updateStatus.value = UpdateStatus.UpdateAvailable(result.manifest)
-                }
-                is UpdateChecker.CheckResult.UpToDate -> {
-                    updateStatus.value = UpdateStatus.UpToDate
-                }
-                is UpdateChecker.CheckResult.Error -> {
-                    updateStatus.value = UpdateStatus.Error(result.message)
-                }
-            }
-        }
-    }
-
-    fun downloadAndInstall(apkUrl: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            updateStatus.value = UpdateStatus.Downloading(0f)
-
-            when (val result = updateChecker.downloadApk(apkUrl) { downloaded, total ->
-                val progress = if (total > 0) downloaded.toFloat() / total else 0f
-                updateStatus.value = UpdateStatus.Downloading(progress)
-            }) {
-                is UpdateChecker.DownloadResult.Success -> {
-                    updateStatus.value = UpdateStatus.Installing
-                    when (val installResult = appInstaller.installApk(result.apkFile)) {
-                        is AppInstaller.InstallResult.SessionCreated -> {
-                            // System takes over with install prompt
-                            updateStatus.value = UpdateStatus.Idle
-                        }
-                        is AppInstaller.InstallResult.Error -> {
-                            updateStatus.value = UpdateStatus.Error(installResult.message)
-                        }
-                    }
-                }
-                is UpdateChecker.DownloadResult.Error -> {
-                    updateStatus.value = UpdateStatus.Error(result.message)
-                }
-            }
-        }
-    }
-
-    fun dismissUpdateStatus() {
-        updateStatus.value = UpdateStatus.Idle
-    }
-
-    fun canInstallPackages(): Boolean = appInstaller.canInstallPackages()
 
     fun startDiscovery() {
         bridgeDiscovery.startDiscovery()

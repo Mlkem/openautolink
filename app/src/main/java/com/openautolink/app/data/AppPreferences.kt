@@ -36,8 +36,6 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
         val VIDEO_FPS = intPreferencesKey("video_fps")
         val DISPLAY_MODE = stringPreferencesKey("display_mode")
         val MIC_SOURCE = stringPreferencesKey("mic_source")
-        val SELF_UPDATE_ENABLED = stringPreferencesKey("self_update_enabled")
-        val UPDATE_MANIFEST_URL = stringPreferencesKey("update_manifest_url")
         val NETWORK_INTERFACE = stringPreferencesKey("network_interface")
         val REMOTE_DIAGNOSTICS_ENABLED = booleanPreferencesKey("remote_diagnostics_enabled")
         val REMOTE_DIAGNOSTICS_MIN_LEVEL = stringPreferencesKey("remote_diagnostics_min_level")
@@ -90,8 +88,6 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
         const val DEFAULT_VIDEO_FPS = 60
         const val DEFAULT_DISPLAY_MODE = "system_ui_visible"
         const val DEFAULT_MIC_SOURCE = "car"
-        const val DEFAULT_SELF_UPDATE_ENABLED = "off"
-        const val DEFAULT_UPDATE_MANIFEST_URL = "https://mossyhub.github.io/openautolink/update.json"
         const val DEFAULT_NETWORK_INTERFACE = "" // empty = auto-select first available
         const val DEFAULT_REMOTE_DIAGNOSTICS_ENABLED = false
         const val DEFAULT_REMOTE_DIAGNOSTICS_MIN_LEVEL = "INFO"
@@ -151,14 +147,6 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
 
     val micSource: Flow<String> = dataStore.data.map { prefs ->
         prefs[MIC_SOURCE] ?: DEFAULT_MIC_SOURCE
-    }
-
-    val selfUpdateEnabled: Flow<String> = dataStore.data.map { prefs ->
-        prefs[SELF_UPDATE_ENABLED] ?: DEFAULT_SELF_UPDATE_ENABLED
-    }
-
-    val updateManifestUrl: Flow<String> = dataStore.data.map { prefs ->
-        prefs[UPDATE_MANIFEST_URL] ?: DEFAULT_UPDATE_MANIFEST_URL
     }
 
     val networkInterface: Flow<String> = dataStore.data.map { prefs ->
@@ -323,14 +311,6 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
 
     suspend fun setMicSource(source: String) {
         dataStore.edit { it[MIC_SOURCE] = source }
-    }
-
-    suspend fun setSelfUpdateEnabled(enabled: String) {
-        dataStore.edit { it[SELF_UPDATE_ENABLED] = enabled }
-    }
-
-    suspend fun setUpdateManifestUrl(url: String) {
-        dataStore.edit { it[UPDATE_MANIFEST_URL] = url }
     }
 
     suspend fun setNetworkInterface(interfaceName: String) {

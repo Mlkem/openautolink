@@ -28,7 +28,6 @@ import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Router
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SettingsRemote
-import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VideoSettings
@@ -85,7 +84,6 @@ private enum class SettingsTab(
     DISPLAY("Display", Icons.Default.DisplaySettings),
     VIDEO("Video", Icons.Default.VideoSettings),
     AUDIO("Audio", Icons.Default.Mic),
-    UPDATES("Updates", Icons.Default.SystemUpdate),
     DIAGNOSTICS("Diagnostics", Icons.Default.BugReport),
 }
 
@@ -135,7 +133,6 @@ fun SettingsScreen(
     onNavigateToContentInsetEditor: () -> Unit = {},
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val updateStatus by viewModel.updateStatus.collectAsStateWithLifecycle()
     var selectedTab by remember { mutableStateOf(SettingsTab.CONNECTION) }
 
     Surface(
@@ -221,7 +218,6 @@ fun SettingsScreen(
                         )
                         SettingsTab.VIDEO -> VideoTab(viewModel, uiState)
                         SettingsTab.AUDIO -> AudioTab(viewModel, uiState)
-                        SettingsTab.UPDATES -> UpdatesTab(viewModel, uiState, updateStatus)
                         SettingsTab.DIAGNOSTICS -> DiagnosticsSettingsTab(
                             viewModel, uiState, onNavigateToDiagnostics
                         )
@@ -1949,227 +1945,6 @@ private fun BridgeTab(viewModel: SettingsViewModel, uiState: SettingsUiState) {
             modifier = Modifier.testTag("fullRestartButton"),
         ) {
             Text("Restart Bridge Services")
-        }
-    }
-}
-
-@Composable
-private fun UpdatesTab(
-    viewModel: SettingsViewModel,
-    uiState: SettingsUiState,
-    updateStatus: UpdateStatus,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
-    ) {
-        SectionHeader("Self-Update")
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        Text(
-            text = "Check for app updates from a GitHub Pages manifest. " +
-                "The app downloads and installs updates directly, bypassing the Play Store.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 12.dp),
-        )
-
-        // Enable/disable toggle
-        Row(
-            modifier = Modifier
-                .fillMaxWidth(0.7f)
-                .padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Enable Self-Update",
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = if (uiState.selfUpdateEnabled == "on")
-                        "App will check for updates from the configured URL"
-                    else
-                        "Updates only via Play Store / AAB install",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(
-                checked = uiState.selfUpdateEnabled == "on",
-                onCheckedChange = { enabled ->
-                    viewModel.updateSelfUpdateEnabled(if (enabled) "on" else "off")
-                },
-                modifier = Modifier.testTag("selfUpdateToggle"),
-            )
-        }
-
-        // URL field — only visible when enabled
-        if (uiState.selfUpdateEnabled == "on") {
-            Spacer(modifier = Modifier.height(12.dp))
-
-            var urlInput by remember(uiState.updateManifestUrl) {
-                mutableStateOf(uiState.updateManifestUrl)
-            }
-            OutlinedTextField(
-                value = urlInput,
-                onValueChange = {
-                    urlInput = it
-                    viewModel.updateManifestUrl(it)
-                },
-                label = { Text("Update Manifest URL") },
-                placeholder = { Text("https://user.github.io/repo/update.json") },
-                singleLine = true,
-                modifier = Modifier
-                    .fillMaxWidth(0.9f)
-                    .testTag("updateManifestUrlInput"),
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = "HTTPS URL to a JSON manifest with version info and APK download link.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            HorizontalDivider(modifier = Modifier.fillMaxWidth(0.7f))
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Check for updates button + status
-            Row(
-                modifier = Modifier.fillMaxWidth(0.7f),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                FilledTonalButton(
-                    onClick = { viewModel.checkForUpdate(uiState.updateManifestUrl) },
-                    enabled = updateStatus !is UpdateStatus.Checking &&
-                        updateStatus !is UpdateStatus.Downloading &&
-                        uiState.updateManifestUrl.isNotBlank(),
-                    modifier = Modifier.testTag("checkForUpdateButton"),
-                ) {
-                    Text("Check Now")
-                }
-
-                when (updateStatus) {
-                    is UpdateStatus.Checking -> {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                        Text(
-                            "Checking...",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-                    else -> {}
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Status display
-            when (updateStatus) {
-                is UpdateStatus.UpdateAvailable -> {
-                    val manifest = updateStatus.manifest
-                    Surface(
-                        tonalElevation = 2.dp,
-                        shape = MaterialTheme.shapes.medium,
-                        modifier = Modifier.fillMaxWidth(0.7f),
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                text = "Update Available: v${manifest.latestVersionName}",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                            if (manifest.changelog.isNotBlank()) {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = manifest.changelog,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            if (!viewModel.canInstallPackages()) {
-                                Text(
-                                    text = "This device does not allow installing apps from this source. " +
-                                        "Enable \"Install unknown apps\" for OpenAutoLink in system settings.",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.padding(bottom = 8.dp),
-                                )
-                            }
-
-                            Button(
-                                onClick = { viewModel.downloadAndInstall(manifest.apkUrl) },
-                                modifier = Modifier.testTag("downloadAndInstallButton"),
-                            ) {
-                                Text("Download & Install")
-                            }
-                        }
-                    }
-                }
-                is UpdateStatus.UpToDate -> {
-                    Text(
-                        text = "You're on the latest version.",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-                is UpdateStatus.Downloading -> {
-                    Column(modifier = Modifier.fillMaxWidth(0.7f)) {
-                        Text(
-                            text = "Downloading update... ${(updateStatus.progress * 100).toInt()}%",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        LinearProgressIndicator(
-                            progress = { updateStatus.progress },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                }
-                is UpdateStatus.Installing -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                        Text(
-                            text = "Preparing install...",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-                }
-                is UpdateStatus.Error -> {
-                    Surface(
-                        tonalElevation = 2.dp,
-                        shape = MaterialTheme.shapes.medium,
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        modifier = Modifier.fillMaxWidth(0.7f),
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                text = updateStatus.message,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            FilledTonalButton(onClick = { viewModel.dismissUpdateStatus() }) {
-                                Text("Dismiss")
-                            }
-                        }
-                    }
-                }
-                is UpdateStatus.Idle, is UpdateStatus.Checking -> {}
-            }
         }
     }
 }
