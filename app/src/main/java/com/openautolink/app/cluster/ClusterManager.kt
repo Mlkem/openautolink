@@ -1,5 +1,6 @@
 package com.openautolink.app.cluster
 
+import android.Manifest
 import android.app.ActivityManager
 import android.content.ComponentName
 import android.content.Context
@@ -8,6 +9,7 @@ import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.openautolink.app.diagnostics.DiagnosticLog
 
 /**
@@ -27,6 +29,14 @@ class ClusterManager(private val context: Context) {
         private const val RELAUNCH_DELAY_MS = 2000L
         private const val RETRY_DELAY_MS = 4000L
         private const val BRING_BACK_DELAY_MS = 1000L
+        private const val PERMISSIONS_RETRY_DELAY_MS = 3000L
+
+        /** Runtime permissions that must be granted before launching CarAppActivity,
+         *  to avoid covering the system permissions dialog. */
+        private val REQUIRED_PERMISSIONS = arrayOf(
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+        )
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -67,6 +77,17 @@ class ClusterManager(private val context: Context) {
     fun launchClusterBinding() {
         if (!enabled) {
             Log.d(TAG, "Cluster not enabled — skipping launch")
+            return
+        }
+
+        // Don't launch CarAppActivity while runtime permissions are pending —
+        // it starts a new task that covers the system permission dialog
+        val pendingPermissions = REQUIRED_PERMISSIONS.any {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (pendingPermissions) {
+            Log.i(TAG, "Runtime permissions pending — deferring cluster launch")
+            handler.postDelayed({ launchClusterBinding() }, PERMISSIONS_RETRY_DELAY_MS)
             return
         }
 
