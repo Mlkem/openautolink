@@ -262,16 +262,25 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
      * Resolve a saved network interface name to an [android.net.Network] for socket binding.
      * Uses two-tier lookup: first by interface name via ConnectivityManager, then falls back
      * to default routing if not found. Skips binding for loopback addresses.
+     *
+     * When no interface is configured (empty string), auto-selects eth0 if available.
+     * On GM AAOS head units, a USB NIC always appears as eth0.
      */
     private fun resolveNetwork(interfaceName: String): Network? {
-        if (interfaceName.isBlank()) {
-            Log.d(TAG, "No preferred network interface — default routing")
-            return null
+        val targetName = interfaceName.ifBlank {
+            // Auto-select: prefer eth0 (USB NIC on GM AAOS), then any Ethernet interface
+            val autoName = findDefaultEthernetInterface()
+            if (autoName != null) {
+                Log.i(TAG, "Auto-selected network interface: $autoName")
+                com.openautolink.app.diagnostics.DiagnosticLog.i("transport",
+                    "Auto-selected network interface: $autoName")
+            }
+            autoName ?: return null // no ethernet found — default routing
         }
         try {
             for (network in connectivityManager.allNetworks) {
                 val linkProps = connectivityManager.getLinkProperties(network) ?: continue
-                if (linkProps.interfaceName == interfaceName) {
+                if (linkProps.interfaceName == targetName) {
                     val caps = connectivityManager.getNetworkCapabilities(network)
                     val transport = when {
                         caps?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true -> "Ethernet"
@@ -279,19 +288,42 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
                         caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> "WiFi"
                         else -> "other"
                     }
-                    Log.i(TAG, "Bound to interface '$interfaceName' ($transport) handle=${network.networkHandle}")
+                    Log.i(TAG, "Bound to interface '$targetName' ($transport) handle=${network.networkHandle}")
                     com.openautolink.app.diagnostics.DiagnosticLog.i("transport",
-                        "Bound to interface '$interfaceName' ($transport)")
+                        "Bound to interface '$targetName' ($transport)")
                     return network
                 }
             }
-            Log.w(TAG, "Interface '$interfaceName' not found in ConnectivityManager — default routing")
+            Log.w(TAG, "Interface '$targetName' not found in ConnectivityManager — default routing")
             com.openautolink.app.diagnostics.DiagnosticLog.w("transport",
-                "Interface '$interfaceName' not found — default routing")
+                "Interface '$targetName' not found — default routing")
         } catch (e: Exception) {
             Log.w(TAG, "Network resolution failed: ${e.message}")
         }
         return null
+    }
+
+    /**
+     * Find the best default Ethernet interface for bridge communication.
+     * Prefers eth0 (USB NIC on GM AAOS), then any other Ethernet/USB transport interface.
+     */
+    private fun findDefaultEthernetInterface(): String? {
+        var fallback: String? = null
+        try {
+            for (network in connectivityManager.allNetworks) {
+                val caps = connectivityManager.getNetworkCapabilities(network) ?: continue
+                val linkProps = connectivityManager.getLinkProperties(network) ?: continue
+                val name = linkProps.interfaceName ?: continue
+                val isEthernet = caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ||
+                        caps.hasTransport(NetworkCapabilities.TRANSPORT_USB)
+                if (!isEthernet) continue
+                if (name == "eth0") return name // preferred — GM AAOS USB NIC
+                if (fallback == null) fallback = name
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Ethernet interface scan failed: ${e.message}")
+        }
+        return fallback
     }
 
     fun toggleStats() {

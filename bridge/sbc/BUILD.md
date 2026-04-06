@@ -1,13 +1,25 @@
 # OpenAutoLink Bridge — SBC Setup Guide
 
+## Overview
+
+This guide walks you through setting up the bridge on an SBC. The process is:
+
+1. Flash a Linux OS onto your SBC (you do this yourself)
+2. Get SSH access while the SBC still has internet
+3. Run the install script (downloads everything from GitHub)
+4. Edit config if needed
+5. Reboot — **after reboot, the SBC's network adapters are reconfigured for the car and phone, so internet access is no longer available**
+
+> **Important:** The install script must be run while the SBC has internet access (to download packages and the bridge binary). After reboot, the onboard Ethernet becomes the car connection and the WiFi radio becomes connection for the phone to bridge AA communication — neither provides internet. Make sure you're happy with your config before rebooting.
+
 ## What You Need
 
 - **ARM64 single-board computer** with WiFi + Bluetooth
-  - Tested: Raspberry Pi CM5, Khadas VIM4
+  - Tested: Raspberry Pi 5 / CM5, Khadas VIM4
   - Should work: any ARM64 SBC with WiFi AP capability and BT 4.0+
 - **microSD card** (16GB+) or eMMC module
 - **USB Ethernet adapter** (to connect the SBC to the car's USB port)
-- **Way to SSH into the SBC** (USB-C cable, Ethernet cable, or serial console)
+- **Temporary internet access** for initial setup (Ethernet to router, WiFi, or laptop sharing)
 
 ## Step 1: Flash an OS
 
@@ -23,12 +35,12 @@ Flash a lightweight **64-bit Linux** to your SBC's storage:
 
 When flashing with Raspberry Pi Imager, enable SSH and set a username/password in the advanced settings.
 
-## Step 2: Get SSH Access
+## Step 2: Get SSH Access (with Internet)
 
-You need a way to reach your SBC's terminal. Pick one:
+You need SSH access **while the SBC can still reach the internet**. Pick one:
 
-### Option A: Ethernet cable to your laptop/router
-1. Plug an Ethernet cable between the SBC and your laptop (or router)
+### Option A: Ethernet cable to your router
+1. Plug an Ethernet cable between the SBC's onboard Ethernet and your router
 2. Power on the SBC and wait ~30 seconds for boot
 3. Find its IP:
    - Router admin page, or
@@ -36,20 +48,26 @@ You need a way to reach your SBC's terminal. Pick one:
    - `ping raspberrypi.local` (if mDNS works)
 4. SSH in: `ssh pi@<IP>` (or whatever username you set)
 
-### Option B: USB serial console (Raspberry Pi)
+### Option B: Windows WiFi sharing (ICS)
+1. Plug a USB Ethernet adapter into your Windows laptop
+2. Share your laptop's WiFi to the USB adapter via Internet Connection Sharing (ICS):
+   - Network Settings → WiFi adapter → Properties → Sharing → "Allow other network users to connect"
+   - Select the USB Ethernet adapter as the home networking connection
+3. Connect the SBC's onboard Ethernet to the USB adapter with a cable
+4. Power on the SBC — it gets an IP via DHCP from Windows (192.168.137.x range)
+5. Find it: `arp -a` (look for 192.168.137.x entries)
+6. SSH in: `ssh pi@192.168.137.x`
+
+> This approach gives the SBC internet through your laptop's WiFi, which is needed for the install script. After OpenAutoLink is installed and rebooted, the SBC no longer needs this — you can unplug the USB adapter.
+
+### Option C: USB serial console (Raspberry Pi)
 1. Connect a USB-to-UART adapter to the GPIO pins
 2. Open a serial terminal (PuTTY, `screen /dev/ttyUSB0 115200`)
-3. Log in at the console
-
-### Option C: Windows WiFi sharing (developer setup)
-1. Share your Windows WiFi to a USB Ethernet adapter via ICS
-2. Connect the SBC to the USB NIC
-3. Find the SBC via `arp -a` (look for 192.168.137.x)
-4. SSH in: `ssh user@192.168.137.x`
+3. Log in, then ensure the SBC has internet (e.g., plug Ethernet into a router)
 
 ## Step 3: Install OpenAutoLink
 
-Once you have an SSH session, run the installer. It downloads the latest bridge binary, scripts, and services from GitHub and sets everything up:
+Once you have an SSH session **with internet access**, run the installer:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mossyhub/openautolink/main/bridge/sbc/install.sh | sudo bash
@@ -69,30 +87,13 @@ The installer will:
 3. Deploy scripts and config to `/opt/openautolink/`
 4. Create `/etc/openautolink.env` (your main config file)
 5. Configure USB gadget support (Raspberry Pi auto-detected)
-6. Create an `openautolink` user with passwordless sudo (for SSH deploy)
-7. Install and enable systemd services
+6. Set up mDNS discovery (Avahi) so the car app can find the bridge automatically
+7. Create an `openautolink` user with passwordless sudo
+8. Install and enable systemd services
 
-### SSH Key Auth (recommended)
+## Step 4: Configure (Do This Before Rebooting)
 
-After installation, set up SSH key auth so deploy scripts don't prompt for a password:
-
-```bash
-# From your development machine (Windows/Mac/Linux):
-ssh-copy-id openautolink@<SBC_IP>
-
-# Or if you already have a key, add an SSH config entry:
-# ~/.ssh/config
-Host oal-sbc
-    HostName 192.168.137.2
-    User openautolink
-    IdentityFile ~/.ssh/id_ed25519_openautolink
-```
-
-The deploy script (`scripts/deploy-bridge.ps1`) uses `openautolink` as the default SSH user.
-
-## Step 4: Configure
-
-Edit the config file to match your setup:
+Edit the config file to match your setup **now**, while you still have SSH access:
 
 ```bash
 sudo nano /etc/openautolink.env
@@ -102,14 +103,16 @@ Key settings to check:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `OAL_CAR_NET_MODE` | `auto` | How the SBC connects to the car (`auto`, `usb-gadget`, `external-nic`) |
+| `OAL_CAR_NET_MODE` | `external-nic` | How the SBC connects to the car. `external-nic` = onboard Ethernet to car via USB adapter (recommended) |
 | `OAL_CAR_NET_IP` | `192.168.222.222` | IP address the car app connects to |
-| `OAL_VIDEO_WIDTH` | `2400` | Video resolution width sent to phone |
-| `OAL_VIDEO_HEIGHT` | `960` | Video resolution height sent to phone |
+| `OAL_VIDEO_WIDTH` | `2400` | Video resolution width |
+| `OAL_VIDEO_HEIGHT` | `960` | Video resolution height |
 | `OAL_AA_FPS` | `60` | Target FPS |
 | `OAL_AA_CODEC` | `h264` | Video codec (`h264`, `h265`, `vp9`) |
+| `OAL_WIRELESS_COUNTRY` | `US` | Your regulatory country code (affects WiFi channels) |
+| `OAL_AA_INIT_STABLE_INSETS` | `0,0,0,110` | Display safe area (default is for 2024 Blazer EV curved bezel — clear this if your display is flat) |
 
-See the comments in the file for all options.
+See the comments in the env file for all options.
 
 ## Step 5: Reboot
 
@@ -117,16 +120,26 @@ See the comments in the file for all options.
 sudo reboot
 ```
 
-After reboot, the bridge starts automatically. Check status:
+> **After this reboot, the SBC's network adapters are reconfigured:**
+> - **Onboard Ethernet** → static IP `192.168.222.222` for the car connection
+> - **WiFi radio** → access point for the phone (SSID auto-generated, password saved to `/opt/openautolink/wifi-password.txt`)
+> - **Internet access** → gone (neither adapter connects to the internet anymore)
 
-```bash
-systemctl status openautolink
-journalctl -u openautolink -f    # live logs
-```
+The bridge starts automatically on boot. 
+
+### Accessing the SBC After Reboot
+
+Since the SBC no longer has a normal network connection, you have two options:
+
+1. **SSH via the WiFi AP**: Connect your laptop to the OpenAutoLink WiFi network (check the SSID/password), then SSH to `192.168.43.1`
+2. **Plug in a USB Ethernet adapter** (a second one, not the one going to the car): The SBC will assign it an SSH role. With the default static mode, SSH to `192.168.137.2`
 
 ## Updating
 
-To update to the latest version, just run the installer again:
+To update, you need to temporarily give the SBC internet access again:
+
+1. Plug it into a router via Ethernet, or use the laptop WiFi sharing (ICS) setup from Step 2
+2. SSH in and run the installer again:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mossyhub/openautolink/main/bridge/sbc/install.sh | sudo bash
@@ -153,8 +166,8 @@ iw list | grep -A5 "Supported interface modes"   # does HW support AP?
 ### Car app can't connect
 ```bash
 ip addr show                        # check car-facing NIC has an IP
-ping -c1 192.168.222.222            # is the bridge IP reachable?
-systemctl status openautolink-car-net
+systemctl status openautolink-network
+journalctl -u openautolink-network -n 30
 ```
 
 ### Bluetooth issues
@@ -163,34 +176,28 @@ systemctl status openautolink-bt
 bluetoothctl show                   # is BT adapter visible?
 ```
 
+### Need to reconfigure but can't SSH in
+Connect the SBC to a monitor + keyboard (or USB serial console), log in at the console, and edit `/etc/openautolink.env`.
+
 ## File Layout
+
+After installation:
 
 ```
 /opt/openautolink/
 ├── bin/openautolink-headless    # Bridge binary
 ├── scripts/aa_bt_all.py         # Bluetooth pairing + WiFi exchange
 ├── run-openautolink.sh          # Launch wrapper (reads env)
-├── setup-car-net.sh             # Car network setup
-├── setup-network.sh             # Unified network setup
+├── setup-network.sh             # Car + SSH network setup
 ├── start-wireless.sh            # WiFi AP setup
-└── setup-eth-ssh.sh             # SSH NIC setup
+└── stop-wireless.sh             # WiFi AP teardown
 
 /etc/openautolink.env            # Configuration
+/etc/avahi/services/
+└── openautolink.service         # mDNS discovery (car app auto-finds bridge)
 /etc/systemd/system/
 ├── openautolink.service         # Main bridge service
-├── openautolink-car-net.service # Car network
+├── openautolink-network.service # Network setup (car IP + SSH)
 ├── openautolink-wireless.service # WiFi AP
-├── openautolink-bt.service      # Bluetooth
-└── openautolink-eth-ssh.service # SSH NIC
+└── openautolink-bt.service      # Bluetooth
 ```
-| `bridge/openautolink/headless/src/live_session.cpp`      | `/opt/openautolink-src/headless/src/live_session.cpp`     |
-| `bridge/openautolink/headless/include/openautolink/*.hpp` | `/opt/openautolink-src/headless/include/openautolink/*.hpp`|
-| `external/aasdk/`                                        | `/opt/openautolink-src/aasdk/`                            |
-
-## Common Pitfalls
-
-- **NEVER put source/build in user home** (`/home/khadas/`). Use `/opt/openautolink-src/`.
-- **Touch files after scp** — CMake may not detect timestamp changes from Windows.
-- **Must stop service before copying binary** — `Text file busy` error if binary is running.
-- **Strip the binary** — unstripped is ~43MB, stripped is ~2.3MB.
-- **Phone reconnection after restart** — takes 30-60s for BT+WiFi to re-establish.

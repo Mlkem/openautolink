@@ -69,24 +69,25 @@ if ! curl -fsSL -o "${TMP_DIR}/openautolink-headless" \
 fi
 
 # Download SBC files from the repo at the release tag
-SBC_FILES=(
-    "bridge/sbc/openautolink.env"
-    "bridge/sbc/openautolink.service"
-    "bridge/sbc/openautolink-bt.service"
-    "bridge/sbc/openautolink-wireless.service"
-    "bridge/sbc/openautolink-network.service"
-    "bridge/sbc/run-openautolink.sh"
-    "bridge/sbc/setup-network.sh"
-    "bridge/sbc/start-wireless.sh"
-    "bridge/sbc/stop-wireless.sh"
-    "bridge/openautolink/scripts/aa_bt_all.py"
-    "bridge/openautolink/headless/avahi/openautolink.service"
+# Download SBC files — use explicit local names to avoid collisions
+# (the avahi service and systemd service both have the same basename)
+declare -A SBC_FILES=(
+    ["openautolink.env"]="bridge/sbc/openautolink.env"
+    ["openautolink.service"]="bridge/sbc/openautolink.service"
+    ["openautolink-bt.service"]="bridge/sbc/openautolink-bt.service"
+    ["openautolink-wireless.service"]="bridge/sbc/openautolink-wireless.service"
+    ["openautolink-network.service"]="bridge/sbc/openautolink-network.service"
+    ["run-openautolink.sh"]="bridge/sbc/run-openautolink.sh"
+    ["setup-network.sh"]="bridge/sbc/setup-network.sh"
+    ["start-wireless.sh"]="bridge/sbc/start-wireless.sh"
+    ["stop-wireless.sh"]="bridge/sbc/stop-wireless.sh"
+    ["aa_bt_all.py"]="bridge/openautolink/scripts/aa_bt_all.py"
+    ["avahi-openautolink.service"]="bridge/openautolink/headless/avahi/openautolink.service"
 )
 
 echo "  Downloading configuration files..."
-for file in "${SBC_FILES[@]}"; do
-    filename=$(basename "$file")
-    curl -fsSL -o "${TMP_DIR}/${filename}" "${RAW_URL}/${file}" 2>/dev/null || true
+for local_name in "${!SBC_FILES[@]}"; do
+    curl -fsSL -o "${TMP_DIR}/${local_name}" "${RAW_URL}/${SBC_FILES[$local_name]}" 2>/dev/null || true
 done
 echo ""
 
@@ -119,13 +120,9 @@ else
 fi
 
 # Avahi service (mDNS discovery)
-if [ -d /etc/avahi/services ] && [ -f "${TMP_DIR}/openautolink.service" ]; then
-    # Avoid conflict with the systemd service file name
-    local_avahi="${TMP_DIR}/openautolink.service"
-    # Check if it's actually an avahi service file (XML)
-    if head -1 "$local_avahi" | grep -q "xml" 2>/dev/null; then
-        cp "$local_avahi" /etc/avahi/services/openautolink.service
-    fi
+if [ -d /etc/avahi/services ] && [ -f "${TMP_DIR}/avahi-openautolink.service" ]; then
+    cp "${TMP_DIR}/avahi-openautolink.service" /etc/avahi/services/openautolink.service
+    echo "  Installed Avahi mDNS service"
 fi
 
 # SSL certificates for Android Auto TLS handshake
@@ -139,7 +136,7 @@ fi
 echo ""
 
 # ── 4. USB gadget + kernel modules (only if not using external-nic) ──
-echo ">>> [4/6] Checking car network mode..."
+echo ">>> [4/7] Checking car network mode..."
 source /etc/openautolink.env 2>/dev/null || true
 if [ "${OAL_CAR_NET_MODE:-external-nic}" != "external-nic" ]; then
     if [ -f /boot/firmware/config.txt ]; then
@@ -211,10 +208,26 @@ echo "  Config:  /etc/openautolink.env"
 echo "  SSH user: openautolink (passwordless sudo)"
 echo "  Version: ${LATEST_TAG}"
 echo ""
+echo "  ┌──────────────────────────────────────────────────────────────┐"
+echo "  │  IMPORTANT: After reboot, the onboard Ethernet adapter     │"
+echo "  │  will be reconfigured for the car connection and the WiFi  │"
+echo "  │  radio becomes a phone hotspot. Internet access on the     │"
+echo "  │  SBC will no longer be available.                          │"
+echo "  │                                                            │"
+echo "  │  Make any config changes NOW, before rebooting.            │"
+echo "  │                                                            │"
+echo "  │  After reboot, you can still SSH into the SBC via the      │"
+echo "  │  WiFi AP (connect to the OpenAutoLink SSID, then SSH to    │"
+echo "  │  192.168.43.1).                                            │"
+echo "  └──────────────────────────────────────────────────────────────┘"
+echo ""
 echo "  Next steps:"
 echo "    1. Edit /etc/openautolink.env to match your setup"
-echo "    2. (Optional) Copy your SSH public key for key-based auth:"
-echo "       ssh-copy-id openautolink@<SBC_IP>"
-echo "    3. Reboot: sudo reboot"
-echo "    4. Check status: systemctl status openautolink"
+echo "       (video resolution, codec, display insets, country code)"
+echo "    2. Reboot: sudo reboot"
+echo "    3. The bridge starts automatically on boot"
+echo ""
+echo "  To update later:"
+echo "    Temporarily reconnect the SBC to a network with internet,"
+echo "    then run this installer again."
 echo ""

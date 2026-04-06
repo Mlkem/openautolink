@@ -236,7 +236,8 @@ interface=${IFACE}
 dhcp-range=192.168.43.10,192.168.43.50,255.255.255.0,24h
 bind-interfaces
 EOF
-dnsmasq -C /opt/openautolink/dnsmasq.conf || true
+dnsmasq -C /opt/openautolink/dnsmasq.conf \
+    --pid-file=/var/run/openautolink-wifi-dnsmasq.pid || true
 
 # ── Enable Bluetooth ─────────────────────────────────────────────────
 bluetoothctl power on 2>/dev/null || true
