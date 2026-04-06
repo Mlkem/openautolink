@@ -92,6 +92,12 @@ data class CarInfo(
     val steeringAngleDeg: Float? = null,
     val odometerKm: Float? = null,
     val lowFuel: Boolean? = null,
+    val chargePortOpen: Boolean? = null,
+    val chargePortConnected: Boolean? = null,
+    val ignitionState: Int? = null,
+    val evChargeRateW: Float? = null,
+    val evBatteryLevelWh: Float? = null,
+    val evBatteryCapacityWh: Float? = null,
 )
 
 data class DiagnosticsUiState(
@@ -284,6 +290,12 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
                                 steeringAngleDeg = vd.steeringAngleDeg,
                                 odometerKm = vd.odometerKm,
                                 lowFuel = vd.lowFuel,
+                                chargePortOpen = vd.chargePortOpen,
+                                chargePortConnected = vd.chargePortConnected,
+                                ignitionState = vd.ignitionState,
+                                evChargeRateW = vd.evChargeRateW,
+                                evBatteryLevelWh = vd.evBatteryLevelWh,
+                                evBatteryCapacityWh = vd.evBatteryCapacityWh,
                             )
                         }
                     }

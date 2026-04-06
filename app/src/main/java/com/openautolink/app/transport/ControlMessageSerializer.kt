@@ -210,20 +210,19 @@ object ControlMessageSerializer {
 
             is ControlMessage.VehicleData -> buildJsonObject {
                 put("type", "vehicle_data")
-                message.speedKmh?.let { put("speed_kmh", it) }
-                message.gear?.let { put("gear", it) }
-                message.batteryPct?.let { put("battery_pct", it) }
-                message.turnSignal?.let { put("turn_signal", it) }
+                // Bridge field names and formats — must match live_session.cpp extract_* calls
+                message.speedKmh?.let { put("speed_mm_s", (it / 3.6f * 1000).toInt()) }
+                message.gearRaw?.let { put("gear", it) }
+                (message.batteryPct ?: message.fuelLevelPct)?.let { put("fuel_level_pct", it) }
+                message.rangeKm?.let { put("range_m", (it * 1000).toInt()) }
+                message.lowFuel?.let { put("low_fuel", it) }
                 message.parkingBrake?.let { put("parking_brake", it) }
                 message.nightMode?.let { put("night_mode", it) }
-                message.fuelLevelPct?.let { put("fuel_level_pct", it) }
-                message.rangeKm?.let { put("range_km", it) }
-                message.lowFuel?.let { put("low_fuel", it) }
-                message.odometerKm?.let { put("odometer_km", it) }
-                message.ambientTempC?.let { put("ambient_temp_c", it) }
-                message.steeringAngleDeg?.let { put("steering_angle_deg", it) }
+                message.driving?.let { put("driving", it) }
+                message.odometerKm?.let { put("odometer_km_e1", (it * 10).toInt()) }
+                message.ambientTempC?.let { put("temp_e3", (it * 1000).toInt()) }
                 message.headlight?.let { put("headlight", it) }
-                message.hazardLights?.let { put("hazard_lights", it) }
+                message.hazardLights?.let { put("hazard", it) }
                 // P5: IMU sensors
                 message.accelXe3?.let { put("accel_x_e3", it) }
                 message.accelYe3?.let { put("accel_y_e3", it) }

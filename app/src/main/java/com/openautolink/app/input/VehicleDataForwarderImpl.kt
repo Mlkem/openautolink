@@ -38,10 +38,14 @@ class VehicleDataForwarderImpl(
         private const val PARKING_BRAKE_ON = 287310850           // boolean
         private const val NIGHT_MODE = 287310855                 // boolean
         private const val EV_BATTERY_LEVEL = 291504905           // float, Wh
+        private const val INFO_EV_BATTERY_SIZE = 291504390       // float, Wh (capacity)
         private const val ENV_OUTSIDE_TEMPERATURE = 291505923    // float, celsius
         private const val EV_BATTERY_INSTANTANEOUS_CHARGE_RATE = 291504908 // float, W
         private const val RANGE_REMAINING = 291504904            // float, meters
         private const val PERF_ENGINE_RPM = 291504901            // float, RPM (ICE only, likely unavailable on EV)
+        private const val EV_CHARGE_PORT_OPEN = 287310603        // boolean
+        private const val EV_CHARGE_PORT_CONNECTED = 287310604   // boolean
+        private const val IGNITION_STATE = 289408018             // int (0=undefined,1=lock,2=off,3=acc,4=on,5=start)
     }
 
     override var isActive: Boolean = false
@@ -111,10 +115,14 @@ class VehicleDataForwarderImpl(
             PARKING_BRAKE_ON,
             NIGHT_MODE,
             EV_BATTERY_LEVEL,
+            INFO_EV_BATTERY_SIZE,
             ENV_OUTSIDE_TEMPERATURE,
             EV_BATTERY_INSTANTANEOUS_CHARGE_RATE,
             RANGE_REMAINING,
-            PERF_ENGINE_RPM
+            PERF_ENGINE_RPM,
+            EV_CHARGE_PORT_OPEN,
+            EV_CHARGE_PORT_CONNECTED,
+            IGNITION_STATE
         )
 
         val pmClass = pm::class.java
@@ -218,8 +226,12 @@ class VehicleDataForwarderImpl(
         val parkingBrake = currentValues[PARKING_BRAKE_ON] as? Boolean
         val nightMode = currentValues[NIGHT_MODE] as? Boolean
 
-        // EV battery level in Wh — send raw value, bridge handles conversion
-        val batteryPct = (currentValues[EV_BATTERY_LEVEL] as? Float)?.toInt()
+        // EV battery: compute real % from level/capacity (both in Wh)
+        val batteryLevelWh = currentValues[EV_BATTERY_LEVEL] as? Float
+        val batteryCapacityWh = currentValues[INFO_EV_BATTERY_SIZE] as? Float
+        val batteryPct = if (batteryLevelWh != null && batteryCapacityWh != null && batteryCapacityWh > 0) {
+            (batteryLevelWh / batteryCapacityWh * 100).toInt().coerceIn(0, 100)
+        } else null
 
         val ambientTemp = currentValues[ENV_OUTSIDE_TEMPERATURE] as? Float
         val chargeRate = currentValues[EV_BATTERY_INSTANTANEOUS_CHARGE_RATE] as? Float
@@ -227,9 +239,17 @@ class VehicleDataForwarderImpl(
         val rpmRaw = currentValues[PERF_ENGINE_RPM] as? Float
         val rpmE3 = rpmRaw?.let { (it * 1000).toInt() }  // RPM × 1000
 
+        val chargePortOpen = currentValues[EV_CHARGE_PORT_OPEN] as? Boolean
+        val chargePortConnected = currentValues[EV_CHARGE_PORT_CONNECTED] as? Boolean
+        val ignitionState = currentValues[IGNITION_STATE] as? Int
+
+        // Derive driving status: in a drive gear (not P/N/Unknown)
+        val driving = gearInt != null && gearInt !in listOf(0, 1, 4)
+
         return ControlMessage.VehicleData(
             speedKmh = speed,
             gear = gear,
+            gearRaw = gearInt,
             batteryPct = batteryPct,
             turnSignal = null,
             parkingBrake = parkingBrake,
@@ -242,7 +262,14 @@ class VehicleDataForwarderImpl(
             steeringAngleDeg = null,
             headlight = null,
             hazardLights = null,
-            rpmE3 = rpmE3
+            rpmE3 = rpmE3,
+            chargePortOpen = chargePortOpen,
+            chargePortConnected = chargePortConnected,
+            ignitionState = ignitionState,
+            evChargeRateW = chargeRate,
+            evBatteryLevelWh = batteryLevelWh,
+            evBatteryCapacityWh = batteryCapacityWh,
+            driving = driving
         )
     }
 

@@ -134,6 +134,7 @@ sealed class ControlMessage {
     data class VehicleData(
         val speedKmh: Float? = null,
         val gear: String? = null,
+        val gearRaw: Int? = null,
         val batteryPct: Int? = null,
         val turnSignal: String? = null,
         val parkingBrake: Boolean? = null,
@@ -146,6 +147,14 @@ sealed class ControlMessage {
         val steeringAngleDeg: Float? = null,
         val headlight: Int? = null,
         val hazardLights: Boolean? = null,
+        // EV-specific
+        val chargePortOpen: Boolean? = null,
+        val chargePortConnected: Boolean? = null,
+        val ignitionState: Int? = null,
+        val evChargeRateW: Float? = null,
+        val evBatteryLevelWh: Float? = null,
+        val evBatteryCapacityWh: Float? = null,
+        val driving: Boolean? = null,
         // P5: IMU sensors
         val accelXe3: Int? = null,
         val accelYe3: Int? = null,

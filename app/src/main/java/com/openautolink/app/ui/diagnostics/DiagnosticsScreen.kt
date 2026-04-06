@@ -331,6 +331,16 @@ private fun CarTab(car: CarInfo) {
                     it > 20 -> Color(0xFFFFC107)
                     else -> Color(0xFFFF5722)
                 }) }
+            car.evBatteryLevelWh?.let {
+                val capStr = car.evBatteryCapacityWh?.let { c -> " / ${"%.0f".format(c)}" } ?: ""
+                DiagRow("Battery Energy", "${"%.0f".format(it)}$capStr Wh")
+            }
+            car.evChargeRateW?.let { DiagRow("Charge Rate", "${"%.0f".format(it)} W",
+                valueColor = if (it > 0) Color(0xFF4CAF50) else Color.White) }
+            car.chargePortOpen?.let { DiagRow("Charge Port", if (it) "Open" else "Closed",
+                valueColor = if (it) Color(0xFF64B5F6) else Color.White) }
+            car.chargePortConnected?.let { DiagRow("Charger", if (it) "Connected" else "—",
+                valueColor = if (it) Color(0xFF4CAF50) else Color.White) }
             car.fuelLevelPct?.let { DiagRow("Fuel Level", "$it%") }
             car.rangeKm?.let { DiagRow("Range", "${"%.1f".format(it)} km") }
             car.lowFuel?.let { DiagRow("Low Fuel", if (it) "YES" else "No",
@@ -341,6 +351,7 @@ private fun CarTab(car: CarInfo) {
             DiagRow("Night Mode", car.nightMode?.let { if (it) "ON" else "OFF" } ?: "—",
                 valueColor = if (car.nightMode == true) Color(0xFF64B5F6) else Color(0xFFFFC107))
             car.ambientTempC?.let { DiagRow("Outside Temp", "${"%.1f".format(it)} °C") }
+            car.ignitionState?.let { DiagRow("Ignition", ignitionStateToString(it)) }
 
             if (car.turnSignal != null || car.headlight != null || car.hazardLights != null) {
                 Spacer(modifier = Modifier.height(16.dp))
@@ -365,6 +376,16 @@ private fun headlightToString(state: Int): String = when (state) {
     0 -> "Off"
     1 -> "On"
     2 -> "Daytime Running"
+    else -> "Unknown ($state)"
+}
+
+private fun ignitionStateToString(state: Int): String = when (state) {
+    0 -> "Undefined"
+    1 -> "Lock"
+    2 -> "Off"
+    3 -> "Accessory"
+    4 -> "On"
+    5 -> "Start"
     else -> "Unknown ($state)"
 }
 
