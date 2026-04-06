@@ -223,7 +223,16 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    private var hasConnected = false
+
     fun connect() {
+        if (hasConnected && sessionManager.sessionState.value != SessionState.IDLE) {
+            // Session is already running — don't restart.
+            // This prevents reconnect when navigating back from Settings
+            // or when the app resumes from background.
+            return
+        }
+        hasConnected = true
         viewModelScope.launch {
             val host = preferences.bridgeHost.first()
             val port = preferences.bridgePort.first()
@@ -237,6 +246,12 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
                 diagnosticsEnabled = diagEnabled, diagnosticsMinLevel = diagMinLevel,
                 network = network)
         }
+    }
+
+    /** Force reconnect — used by "Save & Connect" button in Settings. */
+    fun reconnect() {
+        hasConnected = false
+        connect()
     }
 
     fun disconnect() {

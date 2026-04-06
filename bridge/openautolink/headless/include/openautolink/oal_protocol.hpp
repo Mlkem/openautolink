@@ -166,6 +166,9 @@ inline bool oal_json_extract_int(const std::string& json, const std::string& key
     if (pos == std::string::npos) return false;
     pos += needle.size();
     while (pos < json.size() && json[pos] == ' ') pos++;
+    // Skip optional quote — app may send integers as strings ("160" vs 160)
+    bool quoted = (pos < json.size() && json[pos] == '"');
+    if (quoted) pos++;
     bool negative = false;
     if (pos < json.size() && json[pos] == '-') { negative = true; pos++; }
     int val = 0;
@@ -186,6 +189,9 @@ inline bool oal_json_extract_float(const std::string& json, const std::string& k
     if (pos == std::string::npos) return false;
     pos += needle.size();
     while (pos < json.size() && json[pos] == ' ') pos++;
+    // Skip optional quote — app may send numbers as strings
+    bool quoted = (pos < json.size() && json[pos] == '"');
+    if (quoted) pos++;
     auto start = pos;
     while (pos < json.size() && (json[pos] == '-' || json[pos] == '.' || (json[pos] >= '0' && json[pos] <= '9'))) pos++;
     if (pos == start) return false;

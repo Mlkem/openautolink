@@ -2424,6 +2424,8 @@ void HeadlessAudioInputHandler::stop() {}
 void HeadlessAudioInputHandler::feedAudio(const uint8_t* data, size_t size) {
     if (!open_) return;
 
+    has_real_audio_.store(true);
+
     aasdk::common::Data audio_data(data, data + size);
     auto ts = static_cast<aasdk::messenger::Timestamp::ValueType>(
         std::chrono::duration_cast<std::chrono::microseconds>(
@@ -2432,6 +2434,42 @@ void HeadlessAudioInputHandler::feedAudio(const uint8_t* data, size_t size) {
     auto promise = aasdk::channel::SendPromise::defer(strand_);
     promise->then([]() {}, [](auto) {});
     channel_->sendMediaSourceWithTimestampIndication(ts, audio_data, std::move(promise));
+}
+
+void HeadlessAudioInputHandler::startSilencePump() {
+    if (!open_) return;
+    has_real_audio_.store(false);
+    silence_running_.store(true);
+    pumpOneSilenceFrame();
+}
+
+void HeadlessAudioInputHandler::pumpOneSilenceFrame() {
+    if (!silence_running_.load() || !open_ || has_real_audio_.load()) return;
+
+    // 20ms of 16kHz 16-bit mono silence = 640 bytes
+    constexpr size_t frame_size = 640;
+    aasdk::common::Data silence(frame_size, 0);
+
+    auto ts = static_cast<aasdk::messenger::Timestamp::ValueType>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+
+    auto promise = aasdk::channel::SendPromise::defer(strand_);
+    promise->then(
+        [this, self = shared_from_this()]() {
+            // After phone ACKs this frame, send another
+            pumpOneSilenceFrame();
+        },
+        [this, self = shared_from_this()](auto e) {
+            std::cerr << "[aasdk] silence pump send error: " << e.what() << std::endl;
+            silence_running_.store(false);
+        });
+    channel_->sendMediaSourceWithTimestampIndication(ts, silence, std::move(promise));
+}
+
+void HeadlessAudioInputHandler::stopSilencePump() {
+    silence_running_.store(false);
+    // No thread to join anymore — pump runs inline on strand
 }
 
 void HeadlessAudioInputHandler::onChannelOpenRequest(
@@ -2467,23 +2505,23 @@ void HeadlessAudioInputHandler::onMediaSourceOpenRequest(
     const aap_protobuf::service::media::source::message::MicrophoneRequest& request)
 {
     open_ = request.open();
+    std::cerr << "[aasdk] mic " << (open_ ? "OPEN" : "CLOSE") << " request" << std::endl;
     output_.emit(R"({"type":"event","event_type":"audio_input_open","open":)" +
                  std::string(open_ ? "true" : "false") + "}");
 
-    // Send mic_start/mic_stop control messages
+    // Send mic_start/mic_stop control messages to car app
     if (oal_session_) {
         if (open_) {
             oal_session_->send_mic_start(16000);
         } else {
             oal_session_->send_mic_stop();
         }
+    }
+
+    if (open_) {
+        stopSilencePump();
     } else {
-        // Fallback: emit audio command to stdout
-        if (open_) {
-            output_.emit(R"({"type":"audio_command","command":8,"decode_type":5,"audio_type":3,"volume":0.0})");
-        } else {
-            output_.emit(R"({"type":"audio_command","command":9,"decode_type":2,"audio_type":3,"volume":0.0})");
-        }
+        stopSilencePump();
     }
 
     aap_protobuf::service::media::source::message::MicrophoneResponse response;
@@ -2491,7 +2529,14 @@ void HeadlessAudioInputHandler::onMediaSourceOpenRequest(
     response.set_session_id(session_);
 
     auto promise = aasdk::channel::SendPromise::defer(strand_);
-    promise->then([]() {},
+    promise->then(
+        [this, self = shared_from_this()]() {
+            if (open_) {
+                // Start pumping silence/audio AFTER response is sent —
+                // inline on strand via repeated dispatch, not a separate thread.
+                startSilencePump();
+            }
+        },
         [this, self = shared_from_this()](auto e) { this->onChannelError(e); });
     channel_->sendMicrophoneOpenResponse(response, std::move(promise));
     channel_->receive(shared_from_this());

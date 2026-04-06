@@ -271,35 +271,37 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
             }
         }
 
-        // Observe vehicle data for car tab — cancel stale collectors on state change
+        // Observe vehicle data for car tab
         viewModelScope.launch {
-            sessionManager.sessionState.collectLatest { state ->
-                sessionManager.vehicleData?.collect { vd ->
-                    _car.value = CarInfo(
-                                isActive = true,
-                                speedKmh = vd.speedKmh,
-                                gear = vd.gear,
-                                parkingBrake = vd.parkingBrake,
-                                nightMode = vd.nightMode,
-                                batteryPct = vd.batteryPct,
-                                fuelLevelPct = vd.fuelLevelPct,
-                                rangeKm = vd.rangeKm,
-                                ambientTempC = vd.ambientTempC,
-                                rpmE3 = vd.rpmE3,
-                                turnSignal = vd.turnSignal,
-                                headlight = vd.headlight,
-                                hazardLights = vd.hazardLights,
-                                steeringAngleDeg = vd.steeringAngleDeg,
-                                odometerKm = vd.odometerKm,
-                                lowFuel = vd.lowFuel,
-                                chargePortOpen = vd.chargePortOpen,
-                                chargePortConnected = vd.chargePortConnected,
-                                ignitionState = vd.ignitionState,
-                                evChargeRateW = vd.evChargeRateW,
-                                evBatteryLevelWh = vd.evBatteryLevelWh,
-                                evBatteryCapacityWh = vd.evBatteryCapacityWh,
-                            )
-                        }
+            // Wait for vehicle data flow to become available (session must be started)
+            while (sessionManager.vehicleData == null) {
+                kotlinx.coroutines.delay(500)
+            }
+            sessionManager.vehicleData?.collect { vd ->
+                _car.value = CarInfo(
+                    isActive = true,
+                    speedKmh = vd.speedKmh,
+                    gear = vd.gear,
+                    parkingBrake = vd.parkingBrake,
+                    nightMode = vd.nightMode,
+                    batteryPct = vd.batteryPct,
+                    fuelLevelPct = vd.fuelLevelPct,
+                    rangeKm = vd.rangeKm,
+                    ambientTempC = vd.ambientTempC,
+                    rpmE3 = vd.rpmE3,
+                    turnSignal = vd.turnSignal,
+                    headlight = vd.headlight,
+                    hazardLights = vd.hazardLights,
+                    steeringAngleDeg = vd.steeringAngleDeg,
+                    odometerKm = vd.odometerKm,
+                    lowFuel = vd.lowFuel,
+                    chargePortOpen = vd.chargePortOpen,
+                    chargePortConnected = vd.chargePortConnected,
+                    ignitionState = vd.ignitionState,
+                    evChargeRateW = vd.evChargeRateW,
+                    evBatteryLevelWh = vd.evBatteryLevelWh,
+                    evBatteryCapacityWh = vd.evBatteryCapacityWh,
+                )
             }
         }
 

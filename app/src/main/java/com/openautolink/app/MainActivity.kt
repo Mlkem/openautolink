@@ -15,11 +15,14 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import com.openautolink.app.data.AppPreferences
 import com.openautolink.app.ui.navigation.AppNavHost
 import com.openautolink.app.ui.projection.ProjectionViewModel
 import com.openautolink.app.ui.theme.OpenAutoLinkTheme
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 class MainActivity : ComponentActivity() {
@@ -46,10 +49,18 @@ class MainActivity : ComponentActivity() {
         // Request runtime permissions on first launch
         requestMissingPermissions()
 
-        // Apply saved display mode (sync read — instant from DataStore cache)
+        // Apply saved display mode (sync read for initial state)
         val prefs = AppPreferences.getInstance(this)
         val displayMode = runBlocking { prefs.displayMode.first() }
         applyDisplayMode(displayMode)
+
+        // Observe display mode changes reactively — applies immediately when
+        // the user changes the setting, no app restart needed
+        lifecycleScope.launch {
+            prefs.displayMode.collectLatest { mode ->
+                applyDisplayMode(mode)
+            }
+        }
 
         window.attributes.layoutInDisplayCutoutMode =
             WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
@@ -63,9 +74,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        val prefs = AppPreferences.getInstance(this)
-        val displayMode = runBlocking { prefs.displayMode.first() }
-        applyDisplayMode(displayMode)
+        // Display mode is now observed reactively — no need to re-read here
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {

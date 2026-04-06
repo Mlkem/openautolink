@@ -413,10 +413,16 @@ private:
     void onMediaChannelAckIndication(const aap_protobuf::service::media::source::message::Ack& indication) override;
     void onChannelError(const aasdk::error::Error& e) override;
 
+    void startSilencePump();
+    void stopSilencePump();
+    void pumpOneSilenceFrame();
+
     boost::asio::io_service::strand strand_;
     std::shared_ptr<aasdk::channel::mediasource::MediaSourceService> channel_;
     ThreadSafeOutputSink& output_;
     bool open_ = false;
+    std::atomic<bool> has_real_audio_{false};
+    std::atomic<bool> silence_running_{false};
     uint32_t session_ = 0;
     class OalSession* oal_session_ = nullptr;
 };
