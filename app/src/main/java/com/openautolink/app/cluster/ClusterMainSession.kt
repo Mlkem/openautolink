@@ -195,12 +195,6 @@ class ClusterMainSession : Session() {
         } else if (isNavigating && hasSeenActiveNav) {
             arrivalTimeoutJob?.cancel()
             arrivalTimeoutJob = null
-            // Send a loading trip to flush stale data from the host before ending
-            try {
-                navManager.updateTrip(Trip.Builder().setLoading(true).build())
-            } catch (e: Exception) {
-                Log.w(TAG, "updateTrip(loading) failed: ${e.message}")
-            }
             Log.i(TAG, "navigationEnded() — nav cleared")
             try {
                 navManager.navigationEnded()

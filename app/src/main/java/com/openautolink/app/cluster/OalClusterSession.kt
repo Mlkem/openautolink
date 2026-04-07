@@ -132,12 +132,6 @@ class OalClusterSession : Session() {
 
             screen?.updateState(maneuver)
         } else if (isNavigating && hasSeenActiveNav) {
-            // Send a loading trip to flush stale data from the host before ending
-            try {
-                navManager.updateTrip(Trip.Builder().setLoading(true).build())
-            } catch (e: Exception) {
-                Log.w(TAG, "updateTrip(loading) failed: ${e.message}")
-            }
             try {
                 navManager.navigationEnded()
             } catch (e: Exception) {
