@@ -36,6 +36,39 @@ class VehicleDataForwarderImpl(
 
         // Minimum interval between vehicle data sends (ms)
         private const val SEND_INTERVAL_MS = 500L
+
+        /** Hardcoded property IDs for GM AAOS runtimes that strip VehiclePropertyIds field names.
+         *  Integer IDs are stable across all AAOS implementations (defined in HAL spec). */
+        private val VEHICLE_PROPERTY_ID_FALLBACK = mapOf(
+            "PERF_VEHICLE_SPEED" to 0x11600207,
+            "PERF_VEHICLE_SPEED_DISPLAY" to 0x11600208,
+            "GEAR_SELECTION" to 0x11400400,
+            "CURRENT_GEAR" to 0x11400401,
+            "PARKING_BRAKE_ON" to 0x11200402,
+            "NIGHT_MODE" to 0x11200407,
+            "IGNITION_STATE" to 0x11400409,
+            "EV_BATTERY_LEVEL" to 0x11600309,
+            "INFO_EV_BATTERY_CAPACITY" to 0x11600106,
+            "EV_BATTERY_INSTANTANEOUS_CHARGE_RATE" to 0x1160030C,
+            "EV_CURRENT_BATTERY_CAPACITY" to 0x1160030D,
+            "EV_BATTERY_AVERAGE_TEMPERATURE" to 0x1160030E,
+            "EV_CHARGE_PORT_OPEN" to 0x1120030A,
+            "EV_CHARGE_PORT_CONNECTED" to 0x1120030B,
+            "EV_CHARGE_STATE" to 0x11400F41,
+            "EV_CHARGE_TIME_REMAINING" to 0x11400F43,
+            "EV_CHARGE_PERCENT_LIMIT" to 0x11600F40,
+            "EV_CHARGE_CURRENT_DRAW_LIMIT" to 0x11600F3F,
+            "EV_BRAKE_REGENERATION_LEVEL" to 0x1140040C,
+            "EV_STOPPING_MODE" to 0x1140040D,
+            "RANGE_REMAINING" to 0x11600308,
+            "ENV_OUTSIDE_TEMPERATURE" to 0x11600703,
+            "PERF_ENGINE_RPM" to 0x11600305,
+            "PERF_ODOMETER" to 0x11600204,
+            "PERF_STEERING_ANGLE" to 0x11600209,
+            "DISTANCE_DISPLAY_UNITS" to 0x11400600,
+            "INFO_FUEL_TYPE" to 0x11410105,
+            "INFO_EV_CONNECTOR_TYPE" to 0x11410107,
+        )
     }
 
     override var isActive: Boolean = false
@@ -346,11 +379,14 @@ class VehicleDataForwarderImpl(
         }
     }
 
-    /** Resolve a static int constant from a class by field name (app_v1 pattern). */
+    /** Resolve a static int constant from a class by field name, with hardcoded fallback.
+     *  GM AAOS strips some field names from VehiclePropertyIds — integer IDs are stable. */
     private fun resolveIntConstant(className: String, fieldName: String): Int? {
         return try {
             Class.forName(className).getField(fieldName).getInt(null)
-        } catch (_: Throwable) { null }
+        } catch (_: Throwable) {
+            VEHICLE_PROPERTY_ID_FALLBACK[fieldName]
+        }
     }
 
     /** Resolve a static float constant from a class by field name (app_v1 pattern). */

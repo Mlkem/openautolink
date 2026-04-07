@@ -43,7 +43,9 @@ Hard-won knowledge from the original CPC200 adapter app. These findings were val
 
 ### VHAL Property Access (Verified on 2024 Blazer EV, April 2026)
 
-Tested via app_v1 diagnostics probe. **Do NOT implement features relying on blocked properties.**
+Tested via app diagnostics probe. **Do NOT implement features relying on blocked properties.**
+
+> **GM SDK Quirk**: GM's AAOS runtime strips many field name constants from `android.car.VehiclePropertyIds`. Properties like `PERF_VEHICLE_SPEED` and `GEAR_SELECTION` exist and work, but `Class.getField("PERF_VEHICLE_SPEED")` throws `NoSuchFieldException`. Fix: `VehicleDataForwarderImpl` uses a hardcoded fallback map of property name → integer ID (from the HAL spec). The integer IDs are stable across all AAOS implementations.
 
 #### Available (GM exposes + permission grantable)
 | Property | Value Example | Permission |
