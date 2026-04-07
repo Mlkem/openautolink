@@ -172,6 +172,17 @@ object ControlMessageSerializer {
                 ControlMessage.PairedPhones(phones = phones)
             }
 
+            "bridge_update_accept" -> ControlMessage.BridgeUpdateAccept()
+
+            "bridge_update_reject" -> ControlMessage.BridgeUpdateReject(
+                reason = obj["reason"]?.jsonPrimitive?.content ?: "unknown"
+            )
+
+            "bridge_update_status" -> ControlMessage.BridgeUpdateStatus(
+                status = obj["status"]?.jsonPrimitive?.content ?: "",
+                message = obj["message"]?.jsonPrimitive?.content ?: ""
+            )
+
             else -> null
         }
     }
@@ -309,6 +320,25 @@ object ControlMessageSerializer {
             is ControlMessage.ForgetPhone -> buildJsonObject {
                 put("type", "forget_phone")
                 put("mac", message.mac)
+            }
+
+            is ControlMessage.BridgeUpdateOffer -> buildJsonObject {
+                put("type", "bridge_update_offer")
+                put("version", message.version)
+                put("size", message.size)
+                put("sha256", message.sha256)
+            }
+
+            is ControlMessage.BridgeUpdateData -> buildJsonObject {
+                put("type", "bridge_update_data")
+                put("offset", message.offset)
+                put("length", message.length)
+                put("data", message.data)
+            }
+
+            is ControlMessage.BridgeUpdateComplete -> buildJsonObject {
+                put("type", "bridge_update_complete")
+                put("sha256", message.sha256)
             }
 
             is ControlMessage.AppLog -> buildJsonObject {

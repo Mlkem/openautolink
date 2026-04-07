@@ -553,21 +553,27 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
     suspend fun getBridgeConfigSnapshot(): Map<String, String> {
         val prefs = dataStore.data.first()
         val config = mutableMapOf<String, String>()
-        prefs[VIDEO_CODEC]?.let { config["video_codec"] = it }
-        prefs[VIDEO_FPS]?.let { config["video_fps"] = it.toString() }
-        prefs[AA_RESOLUTION]?.let { config["aa_resolution"] = it }
-        prefs[AA_DPI]?.let { config["aa_dpi"] = it.toString() }
-        prefs[AA_WIDTH_MARGIN]?.let { config["aa_width_margin"] = it.toString() }
-        prefs[AA_HEIGHT_MARGIN]?.let { config["aa_height_margin"] = it.toString() }
-        prefs[AA_PIXEL_ASPECT]?.let { config["aa_pixel_aspect"] = it.toString() }
-        prefs[DRIVE_SIDE]?.let { config["drive_side"] = it }
-        prefs[HEAD_UNIT_NAME]?.let { config["head_unit_name"] = it }
-        prefs[BT_MAC]?.let { if (it.isNotBlank()) config["bt_mac"] = it }
-        prefs[PHONE_MODE]?.let { config["phone_mode"] = it }
-        prefs[WIFI_BAND]?.let { config["wifi_band"] = it }
-        prefs[WIFI_COUNTRY]?.let { config["wifi_country"] = it }
-        prefs[WIFI_SSID]?.let { if (it.isNotBlank()) config["wifi_ssid"] = it }
-        prefs[WIFI_PASSWORD]?.let { if (it.isNotBlank()) config["wifi_password"] = it }
+        // Always include defaults so bridge uses app defaults even when prefs are unset
+        // (e.g. after clearing app data). Without this, the bridge would keep using
+        // whatever value was sent in the hello message (device DPI, not user's AA DPI).
+        config["video_codec"] = prefs[VIDEO_CODEC] ?: DEFAULT_VIDEO_CODEC
+        config["video_fps"] = (prefs[VIDEO_FPS] ?: DEFAULT_VIDEO_FPS).toString()
+        config["aa_resolution"] = prefs[AA_RESOLUTION] ?: DEFAULT_AA_RESOLUTION
+        config["aa_dpi"] = (prefs[AA_DPI] ?: DEFAULT_AA_DPI).toString()
+        config["aa_width_margin"] = (prefs[AA_WIDTH_MARGIN] ?: DEFAULT_AA_WIDTH_MARGIN).toString()
+        config["aa_height_margin"] = (prefs[AA_HEIGHT_MARGIN] ?: DEFAULT_AA_HEIGHT_MARGIN).toString()
+        config["aa_pixel_aspect"] = (prefs[AA_PIXEL_ASPECT] ?: DEFAULT_AA_PIXEL_ASPECT).toString()
+        config["drive_side"] = prefs[DRIVE_SIDE] ?: DEFAULT_DRIVE_SIDE
+        config["head_unit_name"] = prefs[HEAD_UNIT_NAME] ?: DEFAULT_HEAD_UNIT_NAME
+        val btMac = prefs[BT_MAC] ?: DEFAULT_BT_MAC
+        if (btMac.isNotBlank()) config["bt_mac"] = btMac
+        config["phone_mode"] = prefs[PHONE_MODE] ?: DEFAULT_PHONE_MODE
+        config["wifi_band"] = prefs[WIFI_BAND] ?: DEFAULT_WIFI_BAND
+        config["wifi_country"] = prefs[WIFI_COUNTRY] ?: DEFAULT_WIFI_COUNTRY
+        val wifiSsid = prefs[WIFI_SSID] ?: DEFAULT_WIFI_SSID
+        if (wifiSsid.isNotBlank()) config["wifi_ssid"] = wifiSsid
+        val wifiPassword = prefs[WIFI_PASSWORD] ?: DEFAULT_WIFI_PASSWORD
+        if (wifiPassword.isNotBlank()) config["wifi_password"] = wifiPassword
         // AA UI flags
         val hideClock = prefs[HIDE_AA_CLOCK] ?: DEFAULT_HIDE_AA_CLOCK
         config["hide_clock"] = hideClock.toString()

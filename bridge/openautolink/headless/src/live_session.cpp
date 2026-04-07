@@ -2572,6 +2572,7 @@ void HeadlessAudioInputHandler::onMediaSourceOpenRequest(
     // timeout and cancel the voice session.
     stopSilencePump();
     if (open_) {
+        std::cerr << "[aasdk] starting silence pump" << std::endl;
         startSilencePump();
     }
 

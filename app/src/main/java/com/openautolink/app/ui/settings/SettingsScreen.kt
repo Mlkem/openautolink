@@ -119,6 +119,17 @@ fun SettingsScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var selectedTab by remember { mutableStateOf(SettingsTab.CONNECTION) }
 
+    // Bind bridge update manager from session manager (if running)
+    LaunchedEffect(Unit) {
+        val ctx = viewModel.getApplication<android.app.Application>()
+        val am = ctx.getSystemService(android.media.AudioManager::class.java)
+        val sm = com.openautolink.app.session.SessionManager.getInstance(
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main),
+            ctx, am
+        )
+        viewModel.bindUpdateManager(sm.bridgeUpdateManager)
+    }
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
@@ -2140,6 +2151,93 @@ private fun BridgeTab(viewModel: SettingsViewModel, uiState: SettingsUiState) {
             modifier = Modifier.testTag("fullRestartButton"),
         ) {
             Text("Restart Bridge Services")
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        HorizontalDivider(modifier = Modifier.fillMaxWidth(0.7f))
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // --- Bridge Auto-Update ---
+        SectionHeader("Bridge Updates")
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = "Automatically update the bridge binary from GitHub Releases. " +
+                    "Disable this if you build the bridge locally for development.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth(0.7f)
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Switch(
+                checked = uiState.bridgeAutoUpdate,
+                onCheckedChange = { viewModel.updateBridgeAutoUpdate(it) },
+                modifier = Modifier.testTag("bridgeAutoUpdateToggle"),
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Column {
+                Text(
+                    text = "Auto-update bridge binary",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = if (uiState.bridgeAutoUpdate) "Enabled — checks GitHub on connect"
+                           else "Disabled — using local/manual builds",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        // Update status
+        val updateState by viewModel.bridgeUpdateState.collectAsStateWithLifecycle()
+        val updateMessage by viewModel.bridgeUpdateMessage.collectAsStateWithLifecycle()
+
+        if (updateMessage.isNotBlank()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = updateMessage,
+                style = MaterialTheme.typography.bodyMedium,
+                color = when (updateState) {
+                    com.openautolink.app.transport.BridgeUpdateState.FAILED ->
+                        MaterialTheme.colorScheme.error
+                    com.openautolink.app.transport.BridgeUpdateState.UP_TO_DATE,
+                    com.openautolink.app.transport.BridgeUpdateState.APPLIED ->
+                        MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+
+        if (updateState == com.openautolink.app.transport.BridgeUpdateState.TRANSFERRING ||
+            updateState == com.openautolink.app.transport.BridgeUpdateState.CHECKING ||
+            updateState == com.openautolink.app.transport.BridgeUpdateState.OFFERING) {
+            Spacer(modifier = Modifier.height(8.dp))
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth(0.5f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        FilledTonalButton(
+            onClick = { viewModel.checkForBridgeUpdate() },
+            enabled = updateState != com.openautolink.app.transport.BridgeUpdateState.TRANSFERRING &&
+                      updateState != com.openautolink.app.transport.BridgeUpdateState.APPLYING,
+            modifier = Modifier.testTag("checkBridgeUpdateButton"),
+        ) {
+            Text("Check for Update")
         }
     }
 }

@@ -65,6 +65,17 @@ EOF
 
 cd "$WSL_BUILD"
 
+# Read version from secrets/version.properties if available
+BRIDGE_VERSION="dev"
+VERSION_FILE="${REPO_ROOT}/secrets/version.properties"
+if [ -f "$VERSION_FILE" ]; then
+    VER=$(grep '^versionName=' "$VERSION_FILE" | cut -d= -f2)
+    if [ -n "$VER" ]; then
+        BRIDGE_VERSION="$VER"
+    fi
+fi
+echo "  Bridge version: ${BRIDGE_VERSION}"
+
 if [ ! -f CMakeCache.txt ]; then
     echo ">>> Configuring CMake..."
     cmake "$HEADLESS_DIR" \
@@ -75,7 +86,8 @@ if [ ! -f CMakeCache.txt ]; then
         -DPI_AA_OPENAUTO_SOURCE_DIR="$OPENAUTO_DIR" \
         -DSKIP_BUILD_ABSL=ON \
         -DSKIP_BUILD_PROTOBUF=ON \
-        -DBUILD_AASDK_STATIC=ON
+        -DBUILD_AASDK_STATIC=ON \
+        -DOAL_BRIDGE_VERSION="$BRIDGE_VERSION"
     echo ""
 fi
 

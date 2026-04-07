@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.openautolink.app.data.AppPreferences
 import com.openautolink.app.transport.BridgeDiscovery
+import com.openautolink.app.transport.BridgeUpdateState
 import com.openautolink.app.transport.ConfigUpdateSender
 import com.openautolink.app.transport.ControlMessage
 import com.openautolink.app.transport.DiscoveredBridge
@@ -59,6 +60,7 @@ data class SettingsUiState(
     val hideBatteryLevel: Boolean = AppPreferences.DEFAULT_HIDE_BATTERY_LEVEL,
     val sendImuSensors: Boolean = AppPreferences.DEFAULT_SEND_IMU_SENSORS,
     val distanceUnits: String = AppPreferences.DEFAULT_DISTANCE_UNITS,
+    val bridgeAutoUpdate: Boolean = AppPreferences.DEFAULT_BRIDGE_AUTO_UPDATE,
     // AA safe area insets
     val safeAreaTop: Int = AppPreferences.DEFAULT_SAFE_AREA_TOP,
     val safeAreaBottom: Int = AppPreferences.DEFAULT_SAFE_AREA_BOTTOM,
@@ -125,6 +127,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         preferences.hideBatteryLevel,
         preferences.sendImuSensors,
         preferences.distanceUnits,
+        preferences.bridgeAutoUpdate,
         preferences.safeAreaTop,
         preferences.safeAreaBottom,
         preferences.safeAreaLeft,
@@ -172,14 +175,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             hideBatteryLevel = values[34] as Boolean,
             sendImuSensors = values[35] as Boolean,
             distanceUnits = values[36] as String,
-            safeAreaTop = values[37] as Int,
-            safeAreaBottom = values[38] as Int,
-            safeAreaLeft = values[39] as Int,
-            safeAreaRight = values[40] as Int,
-            contentInsetTop = values[41] as Int,
-            contentInsetBottom = values[42] as Int,
-            contentInsetLeft = values[43] as Int,
-            contentInsetRight = values[42] as Int,
+            bridgeAutoUpdate = values[37] as Boolean,
+            safeAreaTop = values[38] as Int,
+            safeAreaBottom = values[39] as Int,
+            safeAreaLeft = values[40] as Int,
+            safeAreaRight = values[41] as Int,
+            contentInsetTop = values[42] as Int,
+            contentInsetBottom = values[43] as Int,
+            contentInsetLeft = values[44] as Int,
+            contentInsetRight = values[43] as Int,
         )
     }.stateIn(
         viewModelScope,
@@ -427,5 +431,42 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 restartBluetooth = restartBluetooth,
             )
         }
+    }
+
+    // Bridge update state — exposed from SessionManager's BridgeUpdateManager
+    private val _bridgeUpdateState = MutableStateFlow(BridgeUpdateState.IDLE)
+    val bridgeUpdateState: StateFlow<BridgeUpdateState> = _bridgeUpdateState
+
+    private val _bridgeUpdateMessage = MutableStateFlow("")
+    val bridgeUpdateMessage: StateFlow<String> = _bridgeUpdateMessage
+
+    fun updateBridgeAutoUpdate(enabled: Boolean) {
+        viewModelScope.launch { preferences.setBridgeAutoUpdate(enabled) }
+    }
+
+    /**
+     * Bind to the SessionManager's BridgeUpdateManager for state observation.
+     */
+    fun bindUpdateManager(manager: com.openautolink.app.transport.BridgeUpdateManager?) {
+        if (manager == null) return
+        viewModelScope.launch {
+            manager.updateState.collect { _bridgeUpdateState.value = it }
+        }
+        viewModelScope.launch {
+            manager.updateMessage.collect { _bridgeUpdateMessage.value = it }
+        }
+    }
+
+    /**
+     * Trigger a manual bridge update check via SessionManager.
+     */
+    fun checkForBridgeUpdate() {
+        val sessionManager = com.openautolink.app.session.SessionManager.getInstance(
+            viewModelScope,
+            getApplication(),
+            getApplication<Application>().getSystemService(android.media.AudioManager::class.java)
+        )
+        val bridgeInfo = sessionManager.bridgeInfo.value
+        sessionManager.bridgeUpdateManager?.triggerManualCheck(bridgeInfo)
     }
 }

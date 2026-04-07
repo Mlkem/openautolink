@@ -18,6 +18,25 @@ bash scripts/setup-wsl-cross-compile.sh
 
 This installs `aarch64-linux-gnu-g++`, ARM64 Boost/OpenSSL/protobuf/libusb libraries, and CMake.
 
+## SBC SSH Access
+
+**Always use the `oal-sbc` SSH config alias** to connect to the SBC. Do NOT try raw IP addresses (`192.168.222.222`, `192.168.137.x`, etc.) — these depend on which network the SBC is connected to and may not be reachable from the dev PC.
+
+The alias is defined in the user's `~/.ssh/config` and handles host, user, port, and key automatically.
+
+```powershell
+# Check bridge logs:
+ssh oal-sbc "journalctl -u openautolink -n 100 --no-pager"
+
+# Check service status:
+ssh oal-sbc "systemctl status openautolink"
+
+# Restart bridge:
+ssh oal-sbc "sudo systemctl restart openautolink"
+```
+
+All scripts (`deploy-bridge.ps1`, emulator testing) use `oal-sbc` by default.
+
 ## Build + Deploy (Single Command)
 
 From PowerShell:

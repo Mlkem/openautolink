@@ -149,6 +149,10 @@ class SessionManager(
     // IMU forwarder — sends accelerometer/gyro/compass to bridge → phone
     private var _imuForwarder: ImuForwarder? = null
 
+    // Bridge update manager — checks GitHub, downloads, pushes to bridge
+    private var _bridgeUpdateManager: com.openautolink.app.transport.BridgeUpdateManager? = null
+    val bridgeUpdateManager: com.openautolink.app.transport.BridgeUpdateManager? get() = _bridgeUpdateManager
+
     // Navigation display — processes nav_state from bridge
     private val _navigationDisplay: NavigationDisplay = NavigationDisplayImpl()
     val navigationDisplay: NavigationDisplay get() = _navigationDisplay
@@ -240,6 +244,14 @@ class SessionManager(
         _imuForwarder = context?.let { ctx ->
             ImuForwarder(ctx) { imuData ->
                 scope.launch { connectionManager.sendControlMessage(imuData) }
+            }
+        }
+
+        // Create bridge update manager
+        _bridgeUpdateManager?.cancel()
+        _bridgeUpdateManager = context?.let { ctx ->
+            com.openautolink.app.transport.BridgeUpdateManager(ctx, scope) { message ->
+                connectionManager.sendControlMessage(message)
             }
         }
 
@@ -399,6 +411,8 @@ class SessionManager(
         _vehicleDataForwarder = null
         _imuForwarder?.stop()
         _imuForwarder = null
+        _bridgeUpdateManager?.cancel()
+        _bridgeUpdateManager = null
         _navigationDisplay.clear()
         ClusterNavigationState.clear()
         _mediaSessionManager?.release()
@@ -609,7 +623,9 @@ class SessionManager(
                     version = message.version,
                     capabilities = message.capabilities,
                     videoPort = message.videoPort,
-                    audioPort = message.audioPort
+                    audioPort = message.audioPort,
+                    bridgeVersion = message.bridgeVersion,
+                    bridgeSha256 = message.bridgeSha256
                 )
                 _bridgeInfo.value = info
                 // Send system info once on connect
@@ -623,6 +639,8 @@ class SessionManager(
                     // Send all current bridge settings so bridge detects any diffs
                     // and restarts AA session if stream-affecting settings changed
                     syncBridgeSettings()
+                    // Check for bridge binary updates (non-blocking, async)
+                    _bridgeUpdateManager?.onBridgeConnected(info)
                 }
             }
             is ControlMessage.PhoneConnected -> {
@@ -717,6 +735,11 @@ class SessionManager(
                 _pairedPhones.value = message.phones
                 _pairedPhonesCallback?.invoke(message.phones)
             }
+            is ControlMessage.BridgeUpdateAccept,
+            is ControlMessage.BridgeUpdateReject,
+            is ControlMessage.BridgeUpdateStatus -> {
+                _bridgeUpdateManager?.onUpdateMessage(message)
+            }
             else -> {} // Other messages handled by island-specific collectors
         }
     }
@@ -779,5 +802,7 @@ data class BridgeInfo(
     val version: Int,
     val capabilities: List<String>,
     val videoPort: Int,
-    val audioPort: Int
+    val audioPort: Int,
+    val bridgeVersion: String? = null,
+    val bridgeSha256: String? = null
 )
