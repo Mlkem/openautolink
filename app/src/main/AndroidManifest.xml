@@ -67,6 +67,11 @@
                 <action android:name="android.speech.action.VOICE_SEARCH_HANDS_FREE" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+
+            <!-- AAOS Distraction Optimization — allows activity while driving -->
+            <meta-data
+                android:name="distractionOptimized"
+                android:value="true" />
         </activity>
 
         <!-- Hidden CarAppActivity — triggers Templates Host binding for cluster.
