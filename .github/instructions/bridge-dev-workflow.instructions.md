@@ -1,11 +1,66 @@
 ---
 description: "Use when building, deploying, or debugging the C++ bridge binary. Covers WSL cross-compilation, SBC deployment via SCP, and iterative dev workflow. Use this skill whenever the user wants to build bridge code, deploy to the SBC, or troubleshoot bridge builds."
 ---
-# Bridge Dev Workflow — WSL Cross-Compile + SBC Deploy
+# Bridge Dev Workflow
+
+## Development Modes
+
+Three validated development environments. Choose based on what hardware is available:
+
+### Mode 1: In-Car (Real SBC + Real Phone + Real Car)
+```
+┌─────────────┐    USB-NIC     ┌─────────────┐   onboard NIC   ┌───────────────┐
+│  Dev Laptop │◄── ICS SSH ───►│     SBC     │◄── bridge net ──►│   GM AAOS HU  │
+│  (Windows)  │  192.168.137.x │ (ARM64)     │  192.168.222.x   │   (real car)  │
+└─────────────┘                │             │◄── WiFi AP ──────►│  Phone (AA)   │
+                               └─────────────┘   192.168.43.x    └───────────────┘
+```
+- **SBC SSH**: `oal-sbc` alias (192.168.137.2 static on SBC USB-NIC)
+- **Laptop WiFi**: Connected to house WiFi, shared via ICS to USB-NIC → SBC gets internet
+- **Bridge network**: SBC onboard NIC ↔ car USB port (192.168.222.x)
+- **Phone**: Connects via BT pairing → WiFi AP → TCP:5277
+
+### Mode 2: In-House (Real SBC + Emulator + Real Phone)
+```
+┌─────────────┐    USB-NIC     ┌─────────────┐   onboard NIC   ┌───────────────┐
+│  Dev Laptop │◄── ICS SSH ───►│     SBC     │◄── bridge net ──►│ AAOS Emulator │
+│  (Windows)  │  192.168.137.x │ (ARM64)     │  (no car)        │ (on laptop)   │
+└─────────────┘                │             │◄── WiFi AP ──────►│  Phone (AA)   │
+                               └─────────────┘   192.168.43.x    └───────────────┘
+```
+- Same SBC + SSH setup as Mode 1, just no car
+- AAOS emulator connects to SBC bridge via `adb reverse` TCP tunnels
+- Real phone pairs via BT → joins SBC WiFi AP → full AA session
+- See [docs/testing.md](../../docs/testing.md) for emulator setup
+
+### Mode 3: PC-Only (No SBC — Bridge Runs in WSL)
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  Dev Laptop (Windows)                                            │
+│                                                                  │
+│  WSL (Ubuntu) ── openautolink-headless (x86_64 native)          │
+│    ├── TCP:5288/5289/5290 ◄── AAOS Emulator app (adb reverse)  │
+│    └── TCP:5277 ──► Phone via adb forward                        │
+│                     (AA dev mode "Start head unit server")       │
+│                                                                  │
+│  AAOS Emulator ── app connects to localhost bridge               │
+│  Phone ── USB + adb forward tcp:5277 tcp:5277                    │
+└──────────────────────────────────────────────────────────────────┘
+```
+- **No SBC hardware needed** — bridge builds and runs natively in WSL
+- **Fastest iteration**: no cross-compile, no SCP, instant restart
+- **Native debugging**: attach gdb/lldb directly to bridge process
+- **Phone AA**: Phone's AA dev mode → "Start head unit server" → `adb forward tcp:5277 tcp:5277`
+- **Limitations**: No BT pairing flow, no WiFi AP, no real car VHAL
+- See "PC-Only Mode Setup" section below for details
+
+---
 
 ## Overview
 
-The bridge binary (`openautolink-headless`) is an ARM64 Linux binary. For rapid iteration, we cross-compile on WSL (x86_64 → aarch64) and SCP the result to the SBC. This is much faster than building on the SBC itself (CM5 is slow, use `-j1`).
+The bridge binary (`openautolink-headless`) is an ARM64 Linux binary for SBC deployment. For rapid iteration, we cross-compile on WSL (x86_64 → aarch64) and SCP the result to the SBC. This is much faster than building on the SBC itself (CM5 is slow, use `-j1`).
+
+For PC-only development (Mode 3), the bridge builds natively for x86_64 and runs directly in WSL.
 
 ## One-Time Setup
 
@@ -219,3 +274,110 @@ For targeted issue debugging (e.g. mic/voice):
 - The pairing code is one-time; after pairing, only `adb connect` is needed
 - ADB over WiFi adds ~1-2ms latency — negligible for logcat
 - If `adb devices` shows "offline", disconnect and reconnect: `adb disconnect; adb connect <ip>:<port>`
+
+## PC-Only Mode Setup (Mode 3)
+
+No SBC needed. Bridge runs natively in WSL on the dev PC.
+
+### Build Bridge for x86_64
+
+```bash
+# In WSL — native build (no cross-compiler):
+cd /mnt/d/personal/openautolink
+mkdir -p build-bridge-x86 && cd build-bridge-x86
+
+cmake ../bridge/openautolink/headless \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DPI_AA_ENABLE_AASDK_LIVE=ON
+
+cmake --build . --target openautolink-headless -j$(nproc)
+```
+
+This produces a native x86_64 binary — no cross-compilation, no toolchain file.
+Dependencies are the same as the ARM64 cross-compile (Boost, OpenSSL, protobuf, libusb)
+but using the native host packages instead of `:arm64` variants.
+
+### Install Native Dependencies (One-Time)
+
+If you already have the cross-compile toolchain set up, you likely have most deps.
+The native (x86_64) versions:
+
+```bash
+sudo apt-get install -y \
+  libboost-system-dev libboost-log-dev libboost-filesystem-dev libboost-thread-dev \
+  libssl-dev libusb-1.0-0-dev protobuf-compiler libprotobuf-dev cmake g++
+```
+
+### Run Bridge Locally
+
+```bash
+# Set environment (minimal — no BT/WiFi needed):
+export OAL_AA_CODEC=h264
+export OAL_AA_FPS=60
+export OAL_AA_RESOLUTION=1080p
+export OAL_AA_DPI=160
+export OAL_CAR_PORT=5288
+export OAL_VIDEO_PORT=5290
+export OAL_AUDIO_PORT=5289
+
+# Run:
+./build-bridge-x86/openautolink-headless
+```
+
+The bridge listens on TCP 5288/5289/5290 for the car app and TCP 5277 for the phone.
+
+### Connect AAOS Emulator App
+
+The AAOS emulator runs on the Windows host. The bridge runs in WSL. They share
+localhost via WSL2's networking:
+
+1. In the app settings, set **Bridge Host** to the WSL IP (find with `wsl hostname -I`)
+   or use `adb reverse` to expose WSL ports to the emulator:
+   ```powershell
+   adb reverse tcp:5288 tcp:5288
+   adb reverse tcp:5289 tcp:5289
+   adb reverse tcp:5290 tcp:5290
+   ```
+2. Set Bridge Host in app to `127.0.0.1`
+
+### Connect Real Phone for AA
+
+The phone needs to connect to the bridge on TCP 5277 for the AA protocol session.
+Since there's no BT/WiFi AP in this mode, use AA developer mode + ADB forwarding:
+
+1. **Enable AA developer mode on phone** (see [aa-developer-mode.instructions.md](aa-developer-mode.instructions.md))
+2. **Start head unit server** from AA developer overflow menu
+3. **Forward port via ADB** (phone connected via USB):
+   ```powershell
+   adb forward tcp:5277 tcp:5277
+   ```
+4. The bridge connects to the phone's AA server at `localhost:5277`
+
+> **Note**: This requires the bridge to operate in "connect to phone" mode rather than
+> "listen for phone" mode. The bridge's `OAL_PHONE_PROTOCOL` env var or a CLI flag
+> may need to support this. If not yet implemented, this is the missing piece for Mode 3.
+
+### What Works in Mode 3
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Bridge ↔ app TCP | ✅ | Localhost or adb reverse |
+| Video streaming | ✅ | H.264/H.265/VP9 (software decode on emulator) |
+| Audio streaming | ✅ | PCM over TCP |
+| Touch forwarding | ✅ | Emulator touch → bridge → phone |
+| Sensor data | ✅ | Emulator VHAL (fake data) |
+| Phone AA session | ⚠️ | Requires AA dev mode + adb forward; bridge may need connect-to-phone mode |
+| BT pairing | ❌ | No BT hardware in WSL |
+| WiFi AP | ❌ | No WiFi hardware in WSL |
+| Real car VHAL | ❌ | Not connected to car |
+| Native debugging | ✅ | gdb/lldb attach directly to bridge process |
+
+### When to Use Each Mode
+| Scenario | Best Mode |
+|----------|-----------|
+| Testing in the real car | Mode 1 |
+| Full system test at desk with real phone AA | Mode 2 |
+| Rapid bridge C++ iteration (protocol changes, sensor handling) | Mode 3 |
+| Debugging bridge crashes with gdb | Mode 3 |
+| CI/automated testing | Mode 3 |
+| Testing BT pairing or WiFi AP changes | Mode 1 or 2 |
+| Testing real car VHAL data | Mode 1 |
