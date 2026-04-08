@@ -1354,6 +1354,15 @@ void OalSession::handle_bridge_update_data(const std::string& json) {
     }
 
     update_bytes_received_ += decoded.size();
+
+    // Log progress every ~500KB
+    if (update_bytes_received_ <= decoded.size() ||
+        (update_bytes_received_ / 500000) != ((update_bytes_received_ - decoded.size()) / 500000)) {
+        int pct = (update_expected_size_ > 0)
+            ? static_cast<int>(update_bytes_received_ * 100 / update_expected_size_) : 0;
+        std::cerr << "[OAL] bridge update: received " << update_bytes_received_
+                  << "/" << update_expected_size_ << " bytes (" << pct << "%)" << std::endl;
+    }
 }
 
 void OalSession::handle_bridge_update_complete(const std::string& json) {

@@ -78,6 +78,7 @@ class BridgeUpdateManager(
     private var cachedBinaryVersion: String? = null
     private var lastVersionCheckMs = 0L
     private var cachedRelease: GitHubRelease? = null
+    private var updateAttemptedThisSession = false  // only try once per app lifecycle
 
     /**
      * Called when bridge hello is received. Checks if an update is needed
@@ -161,6 +162,7 @@ class BridgeUpdateManager(
     fun triggerManualCheck(bridgeInfo: BridgeInfo?) {
         if (bridgeInfo == null) return
         lastVersionCheckMs = 0 // bypass cache
+        updateAttemptedThisSession = false // allow manual retry
         onBridgeConnected(bridgeInfo)
     }
 
@@ -182,6 +184,7 @@ class BridgeUpdateManager(
 
         _updateState.value = BridgeUpdateState.CHECKING
         _updateMessage.value = "Checking for updates..."
+        DiagnosticLog.i("update", "Check started: bridge=${bridgeInfo.bridgeVersion} sha=${bridgeSha.take(12)}...")
 
         // Check GitHub for latest release
         val release = fetchLatestRelease() ?: run {
@@ -216,6 +219,8 @@ class BridgeUpdateManager(
         cachedBinarySha256 = localSha
         cachedBinaryVersion = release.version
 
+        DiagnosticLog.i("update", "SHA compare: bridge=${bridgeSha.take(12)}... github=${localSha.take(12)}... match=${localSha == bridgeSha}")
+
         if (localSha == bridgeSha) {
             Log.i(TAG, "Bridge is up to date (${release.version})")
             _updateState.value = BridgeUpdateState.UP_TO_DATE
@@ -229,6 +234,18 @@ class BridgeUpdateManager(
         _updateState.value = BridgeUpdateState.UPDATE_AVAILABLE
         _updateMessage.value = "Update available: ${release.version}"
         addHistory("Update available: ${bridgeInfo.bridgeVersion ?: "?"} → ${release.version}")
+
+        // Only attempt one update push per app session.
+        // If we already pushed and the SHA still mismatches (dev deployed a local build),
+        // don't loop — just show that an update is available.
+        if (updateAttemptedThisSession) {
+            Log.i(TAG, "Update already attempted this session — not re-pushing")
+            DiagnosticLog.i("update", "Update already attempted this session — skipping push (dev build?)")
+            _updateMessage.value = "Update available (already attempted this session)"
+            addHistory("Skipped: already attempted this session")
+            return
+        }
+        updateAttemptedThisSession = true
 
         // Send offer to bridge
         _updateState.value = BridgeUpdateState.OFFERING
@@ -290,6 +307,7 @@ class BridgeUpdateManager(
             // Signal transfer complete (only if still in TRANSFERRING state)
             if (_updateState.value == BridgeUpdateState.TRANSFERRING) {
                 _updateMessage.value = "Transfer complete, verifying..."
+                DiagnosticLog.i("update", "Transfer complete: ${file.length()} bytes sent")
                 sendMessage(ControlMessage.BridgeUpdateComplete(sha256 = sha))
             }
             // Wait for bridge_update_status via onUpdateMessage()
