@@ -214,6 +214,8 @@ Active development. All core features are implemented and working on real hardwa
 
 - **Occasional audio jitter/cutout:** Audio may briefly cut out or jitter during playback. This is intermittent and under investigation.
 
+- **H.265 and VP9 codecs not yet working:** Only H.264 is currently functional and is the default. H.265 and VP9 are selectable in Settings → Video but will not produce a working stream yet. This is a bridge-side issue and will be fixed soon. In practice, H.264 at 1080p60 is already excellent — the alternative codecs offer marginally better compression but won't noticeably improve the experience for most users.
+
 - **"Unsupported device" popup on GM EVs:** When the USB Ethernet adapter is plugged into the car's USB-C port, GM's AAOS briefly shows an "Unsupported device" notification. This is cosmetic — the head unit doesn't recognize the adapter as a known accessory (phone, USB drive, etc.), but it still enumerates it as a network interface and assigns it an IP. The popup dismisses itself after a few seconds and has no effect on functionality.
 
 - **USB gadget networking does not work:** I attempted to use Linux USB gadget mode (RNDIS/ECM/NCM) so the SBC itself would present as a USB network device to the car, eliminating the need for a separate USB Ethernet adapter. After extensive testing, GM's head unit never enumerated any gadget configuration. The external USB Ethernet adapter approach is the only method that works.
