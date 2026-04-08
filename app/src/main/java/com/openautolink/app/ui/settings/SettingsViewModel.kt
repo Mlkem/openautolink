@@ -286,12 +286,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 val surfaceW: Int
                 val surfaceH: Int
                 if (displayMode == "fullscreen_immersive") {
+                    // Fullscreen — no padding, video fills entire framebuffer
                     surfaceW = w
                     surfaceH = h
                 } else {
-                    // system_ui_visible: subtract bars + cutout (matching ProjectionScreen padding)
-                    surfaceW = w - maxOf(barInsets.left, cutoutInsets.left) - maxOf(barInsets.right, cutoutInsets.right)
-                    surfaceH = h - maxOf(barInsets.top, cutoutInsets.top) - maxOf(barInsets.bottom, cutoutInsets.bottom)
+                    // system_ui_visible: pad for status bar (top) + cutout (right/left/bottom)
+                    surfaceW = w - cutoutInsets.left - cutoutInsets.right
+                    surfaceH = h - maxOf(barInsets.top, cutoutInsets.top) - cutoutInsets.bottom
                 }
                 val displayAR = surfaceW.toDouble() / surfaceH
                 val videoAR = 1920.0 / 1080.0

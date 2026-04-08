@@ -632,9 +632,13 @@ void OalSession::handle_app_hello(const std::string& json) {
                       << " (manual override)" << std::endl;
         }
 
-        // Auto stable_insets from display cutout only.
-        // With letterbox, scale = display_h / video_h (height fills, bars on sides).
-        if (cut_top > 0 || cut_bottom > 0 || cut_left > 0 || cut_right > 0) {
+        // Auto stable_insets from display cutout.
+        // These tell AA where the physical screen curves/slopes are (in video coords).
+        // In fullscreen, the video fills the entire framebuffer so AA needs these
+        // to keep buttons away from physical curves. In system_ui_visible, the app
+        // pads the SurfaceView to the safe area so stable_insets are less critical,
+        // but we still set them for completeness.
+        if (cut_top > 0 || cut_left > 0 || cut_right > 0 || cut_bottom > 0) {
             double letterbox_scale = static_cast<double>(display_h) / video_h;
 
             int safe_top = (cut_top > 0) ? static_cast<int>(cut_top / letterbox_scale) : 0;

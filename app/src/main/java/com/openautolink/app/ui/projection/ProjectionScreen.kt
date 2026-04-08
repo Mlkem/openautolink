@@ -102,31 +102,15 @@ fun ProjectionScreen(
     val density = LocalDensity.current
     val displayModePadding = with(density) {
         when (uiState.displayMode) {
-            // System bars visible — bars cover cutouts, pad for bars only
+            // System UI visible — pad for status bar (top) and right cutout (physical curve).
             "system_ui_visible" -> androidx.compose.foundation.layout.PaddingValues(
-                start = maxOf(barLeft, cutLeft).toDp(),
-                end = maxOf(barRight, cutRight).toDp(),
                 top = maxOf(barTop, cutTop).toDp(),
-                bottom = maxOf(barBottom, cutBottom).toDp()
-            )
-            // Status bar hidden — video extends into status bar area but must
-            // still avoid display cutout at top and nav bar areas
-            "status_bar_hidden" -> androidx.compose.foundation.layout.PaddingValues(
-                start = maxOf(barLeft, cutLeft).toDp(),
-                end = maxOf(barRight, cutRight).toDp(),
-                top = cutTop.toDp(),
-                bottom = maxOf(barBottom, cutBottom).toDp()
-            )
-            // Nav bar hidden — video extends into nav bar area but must
-            // still avoid display cutout on sides and status bar
-            "nav_bar_hidden" -> androidx.compose.foundation.layout.PaddingValues(
-                start = cutLeft.toDp(),
                 end = cutRight.toDp(),
-                top = maxOf(barTop, cutTop).toDp(),
+                start = cutLeft.toDp(),
                 bottom = cutBottom.toDp()
             )
-            // Fullscreen — video fills entire screen edge-to-edge.
-            // AA stable_insets (sent to bridge) keep buttons away from curves.
+            // Fullscreen — no padding. Video fills entire framebuffer.
+            // AA stable_insets (right only) keep buttons away from the curve.
             "fullscreen_immersive" -> androidx.compose.foundation.layout.PaddingValues()
             else -> androidx.compose.foundation.layout.PaddingValues()
         }
