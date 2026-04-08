@@ -78,7 +78,7 @@ class BridgeUpdateManager(
     private var cachedBinaryVersion: String? = null
     private var lastVersionCheckMs = 0L
     private var cachedRelease: GitHubRelease? = null
-    private var updateAttemptedThisSession = false  // only try once per app lifecycle
+    private var lastPushedSha: String? = null  // SHA of the binary we last pushed to the bridge
 
     /**
      * Called when bridge hello is received. Checks if an update is needed
@@ -162,7 +162,7 @@ class BridgeUpdateManager(
     fun triggerManualCheck(bridgeInfo: BridgeInfo?) {
         if (bridgeInfo == null) return
         lastVersionCheckMs = 0 // bypass cache
-        updateAttemptedThisSession = false // allow manual retry
+        lastPushedSha = null // allow manual retry
         onBridgeConnected(bridgeInfo)
     }
 
@@ -235,17 +235,16 @@ class BridgeUpdateManager(
         _updateMessage.value = "Update available: ${release.version}"
         addHistory("Update available: ${bridgeInfo.bridgeVersion ?: "?"} → ${release.version}")
 
-        // Only attempt one update push per app session.
-        // If we already pushed and the SHA still mismatches (dev deployed a local build),
-        // don't loop — just show that an update is available.
-        if (updateAttemptedThisSession) {
-            Log.i(TAG, "Update already attempted this session — not re-pushing")
-            DiagnosticLog.i("update", "Update already attempted this session — skipping push (dev build?)")
-            _updateMessage.value = "Update available (already attempted this session)"
-            addHistory("Skipped: already attempted this session")
+        // Guard: if we already pushed this exact binary and the bridge still has a
+        // different SHA, something replaced it (dev deployed a local build). Don't loop.
+        if (lastPushedSha != null && lastPushedSha == localSha) {
+            Log.i(TAG, "Already pushed this binary — bridge SHA still differs (dev build?)")
+            DiagnosticLog.i("update", "Already pushed SHA ${localSha.take(12)}... — bridge didn't keep it (dev override?)")
+            _updateMessage.value = "Update available (bridge was overridden)"
+            addHistory("Skipped: already pushed, bridge has different binary")
             return
         }
-        updateAttemptedThisSession = true
+        lastPushedSha = localSha
 
         // Send offer to bridge
         _updateState.value = BridgeUpdateState.OFFERING
