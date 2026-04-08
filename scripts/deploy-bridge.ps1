@@ -143,7 +143,7 @@ if ($Full) {
     Write-Host ""
 }
 
-# ── Step 4: Deploy binary ─────────────────────────────────────────────
+# ── Step 4: Deploy binary + update script ─────────────────────────────
 Write-Host ">>> Deploying binary..." -ForegroundColor Yellow
 # Ensure bin dir exists (for non-Full deploys after a manual mkdir)
 ssh $Target "sudo mkdir -p /opt/openautolink/bin" 2>$null
@@ -151,6 +151,13 @@ ssh $Target "sudo mkdir -p /opt/openautolink/bin" 2>$null
 scp $BinaryPath "${Target}:/tmp/openautolink-headless"
 if ($LASTEXITCODE -ne 0) { throw "SCP binary failed" }
 Invoke-Ssh "sudo mv /tmp/openautolink-headless /opt/openautolink/bin/openautolink-headless && sudo chmod +x /opt/openautolink/bin/openautolink-headless"
+
+# Always deploy the update apply script alongside the binary
+$applyScript = Join-Path $SbcDir "apply-bridge-update.sh"
+if (Test-Path $applyScript) {
+    scp $applyScript "${Target}:/tmp/apply-bridge-update.sh"
+    Invoke-Ssh "sudo mv /tmp/apply-bridge-update.sh /opt/openautolink/bin/apply-bridge-update.sh && sudo sed -i 's/\r$//' /opt/openautolink/bin/apply-bridge-update.sh && sudo chmod +x /opt/openautolink/bin/apply-bridge-update.sh"
+}
 
 # ── Step 5: Start service ─────────────────────────────────────────────
 Write-Host ">>> Starting service..." -ForegroundColor Yellow
