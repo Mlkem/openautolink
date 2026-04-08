@@ -138,3 +138,84 @@ Windows (PowerShell)
   │
   └── SBC running at 192.168.137.x (via Windows ICS)
 ```
+
+## Phone ADB via SBC (Remote Phone Debugging)
+
+The phone and SBC share the bridge's WiFi AP network (192.168.43.x). This enables
+a remote debugging chain from the dev PC through the SBC to the phone:
+
+```
+Dev PC  ─── SSH oal-sbc ───▶  SBC (192.168.43.1)  ─── ADB ───▶  Phone (192.168.43.x)
+```
+
+This lets you run `adb logcat` on the phone **from the dev PC or from Copilot** to see
+AA, Google Assistant, Maps, and sensor logs — invaluable for debugging issues like
+mic/voice failures, EV data, or AA protocol behavior.
+
+### One-Time Setup
+
+**On the phone:**
+1. Enable **Developer Options**: Settings → About Phone → tap Build Number 7 times
+2. Enable **Wireless debugging**: Developer Options → Wireless debugging → ON
+3. Tap **Wireless debugging** to see the pairing code and port
+
+**On the SBC (via SSH):**
+```bash
+# Install adb (one-time):
+ssh oal-sbc "sudo apt-get install -y android-tools-adb"
+
+# Pair with phone (one-time — enter the 6-digit code shown on phone):
+ssh oal-sbc "adb pair <phone_ip>:<pairing_port>"
+# Example: adb pair 192.168.43.100:37123
+
+# Connect (needed after each phone reboot/WiFi reconnect):
+ssh oal-sbc "adb connect <phone_ip>:<debug_port>"
+# Example: adb connect 192.168.43.100:42345
+# Note: pairing port and debug port are DIFFERENT — check phone screen
+```
+
+### Daily Use
+
+After initial pairing, reconnect is usually automatic when the phone joins the
+bridge WiFi. If not, just `adb connect` again.
+
+```powershell
+# Verify phone is connected:
+ssh oal-sbc "adb devices"
+
+# Full logcat (verbose — use filters!):
+ssh oal-sbc "adb logcat -d | tail -200"
+
+# AA-specific logs:
+ssh oal-sbc "adb logcat -s AndroidAuto -d | tail -50"
+
+# Google Assistant / voice debugging:
+ssh oal-sbc "adb logcat -s GoogleAssistant,AssistantVoice,MicrophoneInputStream -d | tail -50"
+
+# Maps / navigation / EV data:
+ssh oal-sbc "adb logcat -s Maps,GoogleMaps,SensorManager -d | tail -50"
+
+# AA protocol / connection:
+ssh oal-sbc "adb logcat -d | grep -iE 'androidauto|gearhead|projection|sensor.*fuel' | tail -50"
+
+# Live streaming logcat (Ctrl+C to stop):
+ssh oal-sbc "adb logcat -s AndroidAuto"
+
+# Clear logcat buffer (do before reproducing an issue):
+ssh oal-sbc "adb logcat -c"
+```
+
+### Debugging Workflow
+
+For targeted issue debugging (e.g. mic/voice):
+1. Clear logcat: `ssh oal-sbc "adb logcat -c"`
+2. Reproduce the issue on the car (press mic button, etc.)
+3. Pull logs: `ssh oal-sbc "adb logcat -d | grep -iE 'voice|mic|assistant|audio' | tail -100"`
+
+### Important Notes
+- **No root required** — standard ADB wireless debugging works
+- Phone must have **screen unlocked** for initial wireless debugging pairing
+- The debug port changes on each phone reboot — check phone's wireless debugging screen
+- The pairing code is one-time; after pairing, only `adb connect` is needed
+- ADB over WiFi adds ~1-2ms latency — negligible for logcat
+- If `adb devices` shows "offline", disconnect and reconnect: `adb disconnect; adb connect <ip>:<port>`
