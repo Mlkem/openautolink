@@ -46,6 +46,7 @@ data class VideoStats(
     val framesDecoded: Long = 0,
     val framesDropped: Long = 0,
     val codec: String = "none",
+    val codecFormat: String = "",
     val decoderName: String = "",
     val isHardware: Boolean = false,
     val width: Int = 0,

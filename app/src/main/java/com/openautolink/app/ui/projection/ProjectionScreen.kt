@@ -304,7 +304,7 @@ fun ProjectionScreen(
                 audioStats = uiState.audioStats,
                 sessionState = uiState.sessionState,
                 bridgeName = uiState.bridgeName,
-                bridgeVersion = uiState.bridgeVersion,
+                bridgeVersionStr = uiState.bridgeVersionStr,
                 bridgeUptimeSeconds = uiState.bridgeUptimeSeconds,
                 phoneName = uiState.phoneName,
                 phoneBatteryLevel = uiState.phoneBatteryLevel,
@@ -324,7 +324,7 @@ private fun VideoStatsOverlay(
     audioStats: AudioStats,
     sessionState: SessionState,
     bridgeName: String?,
-    bridgeVersion: Int?,
+    bridgeVersionStr: String?,
     bridgeUptimeSeconds: Long,
     phoneName: String?,
     phoneBatteryLevel: Int?,
@@ -346,7 +346,7 @@ private fun VideoStatsOverlay(
 
             // Bridge info
             if (bridgeName != null) {
-                val versionStr = bridgeVersion?.let { " v$it" } ?: ""
+                val versionStr = bridgeVersionStr?.let { " v$it" } ?: ""
                 StatLine("Bridge", "$bridgeName$versionStr")
             }
             if (bridgeUptimeSeconds > 0) {
@@ -355,17 +355,40 @@ private fun VideoStatsOverlay(
 
             // Phone info
             if (phoneName != null) {
-                val batteryStr = phoneBatteryLevel?.let { " ($it%)" } ?: ""
-                val signalStr = phoneSignalStrength?.let { " ▮".repeat(it) + "▯".repeat((4 - it).coerceAtLeast(0)) } ?: ""
-                StatLine("Phone", "$phoneName$batteryStr$signalStr")
+                StatLine("Phone", phoneName)
+            }
+            if (phoneBatteryLevel != null) {
+                StatLine("Battery", "$phoneBatteryLevel%",
+                    valueColor = when {
+                        phoneBatteryLevel >= 50 -> Color.Green
+                        phoneBatteryLevel >= 20 -> Color(0xFFFFFF00)
+                        else -> Color.Red
+                    })
+            }
+            if (phoneSignalStrength != null) {
+                val level = phoneSignalStrength.coerceIn(0, 5)
+                val label = when {
+                    level >= 4 -> "Strong"
+                    level >= 3 -> "Good"
+                    level >= 2 -> "Fair"
+                    level >= 1 -> "Weak"
+                    else -> "None"
+                }
+                StatLine("Signal", "$level/5 $label",
+                    valueColor = when {
+                        level >= 4 -> Color.Green
+                        level >= 3 -> Color(0xFFFFFF00)
+                        level >= 2 -> Color(0xFFFFAB00)
+                        else -> Color.Red
+                    })
             }
 
             if (stats.codec != "none") {
                 Spacer(modifier = Modifier.height(4.dp))
-                StatLine("Codec", "${stats.codec}${if (stats.isHardware) " HW" else " SW"}")
-                if (stats.decoderName.isNotBlank()) {
-                    StatLine("Decoder", stats.decoderName)
+                if (stats.codecFormat.isNotBlank()) {
+                    StatLine("Codec", stats.codecFormat)
                 }
+                StatLine("Decoder", "${stats.decoderName}${if (stats.isHardware) " HW" else " SW"}")
                 if (stats.width > 0) {
                     StatLine("Resolution", "${stats.width}x${stats.height}")
                 }

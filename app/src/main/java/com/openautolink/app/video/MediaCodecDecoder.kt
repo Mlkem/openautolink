@@ -1,7 +1,6 @@
 package com.openautolink.app.video
 
 import android.media.MediaCodec
-import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.util.Log
 import android.view.Surface
@@ -369,26 +368,26 @@ class MediaCodecDecoder(
                 return
             }
 
-            // Parse SPS to get actual video dimensions from codec config
-            val spsDims = NalParser.parseSpsResolution(configData)
+            // Parse codec config to get actual video dimensions
+            // H.264: parse SPS NAL. H.265: parse from frame headers (SPS parsing is complex)
+            val spsDims = if (mimeType == CodecSelector.MIME_H264) {
+                NalParser.parseSpsResolution(configData)
+            } else null
             val videoWidth = spsDims?.first ?: pendingWidth ?: surfaceWidth
             val videoHeight = spsDims?.second ?: pendingHeight ?: surfaceHeight
-            Log.i(TAG, "Configuring codec with video dims: ${videoWidth}x${videoHeight} (surface: ${surfaceWidth}x${surfaceHeight})")
 
-            val format = MediaFormat.createVideoFormat(mimeType, videoWidth, videoHeight)
+            // Ensure we have valid dimensions — H.265 initial config may arrive before
+            // frame headers provide width/height. Use a reasonable default to avoid 0x0.
+            val configWidth = if (videoWidth > 0) videoWidth else 1920
+            val configHeight = if (videoHeight > 0) videoHeight else 1080
+            Log.i(TAG, "Configuring codec with video dims: ${configWidth}x${configHeight} " +
+                    "(parsed=${spsDims != null}, pending=${pendingWidth}x${pendingHeight}, surface: ${surfaceWidth}x${surfaceHeight})")
+
+            val format = MediaFormat.createVideoFormat(mimeType, configWidth, configHeight)
             format.setByteBuffer("csd-0", java.nio.ByteBuffer.wrap(configData))
             // Low-latency hints for real-time video stream
             format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
             try { format.setInteger("priority", 0) } catch (_: Exception) {} // 0 = realtime priority
-            // Force 8-bit color output — H.265 decoders may default to 10-bit (P010)
-            // which causes green hue on surfaces that expect 8-bit YUV
-            if (mimeType == CodecSelector.MIME_H265) {
-                format.setInteger(MediaFormat.KEY_COLOR_FORMAT,
-                    MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
-                // Request SDR color range to avoid HDR tone-mapping issues
-                try { format.setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED) }
-                catch (_: Exception) {}
-            }
 
             val mc = MediaCodec.createByCodecName(decoderName)
             mc.configure(format, surface, null, 0)
@@ -647,12 +646,19 @@ class MediaCodecDecoder(
                 ?.isHardwareAccelerated == true
             } catch (_: Exception) { false }
         } ?: current.isHardware
+        val codecFormat = when (mimeType) {
+            CodecSelector.MIME_H264 -> "H.264"
+            CodecSelector.MIME_H265 -> "H.265"
+            CodecSelector.MIME_VP9 -> "VP9"
+            else -> mimeType
+        }
         _stats.value = current.copy(
             fps = currentFps,
             framesReceived = (framesDecoded.get() + framesDropped.get()),
             framesDecoded = framesDecoded.get(),
             framesDropped = framesDropped.get(),
             codec = codecName ?: current.codec,
+            codecFormat = codecFormat,
             decoderName = codecName ?: current.decoderName,
             isHardware = isHw,
             width = pendingWidth ?: current.width,

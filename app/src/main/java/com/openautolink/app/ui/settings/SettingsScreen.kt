@@ -1557,25 +1557,33 @@ private fun VideoTab(viewModel: SettingsViewModel, uiState: SettingsUiState) {
             modifier = Modifier.fillMaxWidth(0.7f)
         )
 
-        // Quick presets
+        // Quick presets — laid out as chips, not aligned to slider
         Row(
-            modifier = Modifier.fillMaxWidth(0.7f),
-            horizontalArrangement = Arrangement.SpaceBetween
+            modifier = Modifier
+                .fillMaxWidth(0.7f)
+                .padding(top = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             listOf(120, 160, 200, 240, 320).forEach { preset ->
                 val isSelected = uiState.aaDpi == preset
-                Text(
-                    text = "$preset",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .clickable {
-                            sliderDpi = preset
-                            viewModel.updateAaDpi(preset)
-                        }
-                        .padding(vertical = 4.dp, horizontal = 4.dp)
-                )
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = if (isSelected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.clickable {
+                        sliderDpi = preset
+                        viewModel.updateAaDpi(preset)
+                    }
+                ) {
+                    Text(
+                        text = "$preset",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
             }
         }
 
