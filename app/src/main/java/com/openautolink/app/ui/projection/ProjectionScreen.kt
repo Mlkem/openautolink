@@ -308,7 +308,6 @@ fun ProjectionScreen(
                 bridgeUptimeSeconds = uiState.bridgeUptimeSeconds,
                 phoneName = uiState.phoneName,
                 phoneBatteryLevel = uiState.phoneBatteryLevel,
-                phoneSignalStrength = uiState.phoneSignalStrength,
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .padding(12.dp)
@@ -328,7 +327,6 @@ private fun VideoStatsOverlay(
     bridgeUptimeSeconds: Long,
     phoneName: String?,
     phoneBatteryLevel: Int?,
-    phoneSignalStrength: Int?,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -362,23 +360,6 @@ private fun VideoStatsOverlay(
                     valueColor = when {
                         phoneBatteryLevel >= 50 -> Color.Green
                         phoneBatteryLevel >= 20 -> Color(0xFFFFFF00)
-                        else -> Color.Red
-                    })
-            }
-            if (phoneSignalStrength != null) {
-                val level = phoneSignalStrength.coerceIn(0, 5)
-                val label = when {
-                    level >= 4 -> "Strong"
-                    level >= 3 -> "Good"
-                    level >= 2 -> "Fair"
-                    level >= 1 -> "Weak"
-                    else -> "None"
-                }
-                StatLine("Signal", "$level/5 $label",
-                    valueColor = when {
-                        level >= 4 -> Color.Green
-                        level >= 3 -> Color(0xFFFFFF00)
-                        level >= 2 -> Color(0xFFFFAB00)
                         else -> Color.Red
                     })
             }
