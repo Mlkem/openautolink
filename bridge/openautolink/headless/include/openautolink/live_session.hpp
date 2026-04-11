@@ -89,6 +89,10 @@ public:
     void start();
     void stop();
 
+    // Send ByeByeRequest to phone, wait for response (with timeout), then stop.
+    // Calls completion_cb on the strand when done (whether phone responded or timed out).
+    void graceful_shutdown(std::function<void()> completion_cb, int timeout_ms = 2000);
+
     std::shared_ptr<HeadlessVideoHandler> video_handler() const { return video_handler_; }
     std::shared_ptr<HeadlessAudioHandler> media_audio_handler() const { return media_audio_handler_; }
     std::shared_ptr<HeadlessInputHandler> input_handler() const { return input_handler_; }
@@ -136,11 +140,17 @@ private:
     HeadlessConfig config_;
     bool active_ = false;
     DisconnectCallback disconnect_cb_;
-    bool is_tcp_server_ = false;
 
     // Ping timer
     boost::asio::deadline_timer ping_timer_;
     bool ping_outstanding_ = false;
+
+    // Graceful shutdown state
+    boost::asio::deadline_timer shutdown_timer_;
+    std::function<void()> shutdown_completion_cb_;
+    bool shutdown_pending_ = false;
+
+    bool is_tcp_server_ = false;
 
     // Service handlers
     std::shared_ptr<HeadlessVideoHandler> video_handler_;
@@ -224,6 +234,10 @@ public:
 
     // Restart the AA session with updated config.
     void restart_with_config(const HeadlessConfig& new_config);
+
+    // Gracefully disconnect the phone (ByeByeRequest) then call completion_cb.
+    // If no phone is connected, calls completion_cb immediately.
+    void graceful_disconnect_phone(std::function<void()> completion_cb);
 
     // Update config without restarting — used to push auto-computed values
     // (pixel_aspect, stable_insets) before the phone connects.

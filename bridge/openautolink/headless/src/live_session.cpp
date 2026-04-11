@@ -249,6 +249,7 @@ HeadlessAutoEntity::HeadlessAutoEntity(
     , output_(output)
     , config_(config)
     , ping_timer_(io_service)
+    , shutdown_timer_(io_service)
     , is_tcp_server_(true)
 {
     control_channel_ = std::make_shared<aasdk::channel::control::ControlServiceChannel>(strand_, messenger_);
@@ -322,6 +323,7 @@ void HeadlessAutoEntity::start() {
 void HeadlessAutoEntity::stop() {
     strand_.dispatch([this, self = shared_from_this()]() {
         active_ = false;
+        shutdown_timer_.cancel();
         video_handler_->stop();
         media_audio_handler_->stop();
         speech_audio_handler_->stop();
@@ -335,6 +337,56 @@ void HeadlessAutoEntity::stop() {
         messenger_->stop();
         transport_->stop();
         cryptor_->deinit();
+    });
+}
+
+void HeadlessAutoEntity::graceful_shutdown(std::function<void()> completion_cb, int timeout_ms) {
+    strand_.dispatch([this, self = shared_from_this(), cb = std::move(completion_cb), timeout_ms]() {
+        if (!active_ || !control_channel_) {
+            std::cerr << "[aasdk] graceful_shutdown: not active, completing immediately" << std::endl;
+            if (cb) cb();
+            return;
+        }
+
+        std::cerr << "[aasdk] graceful_shutdown: sending ByeByeRequest to phone" << std::endl;
+        shutdown_pending_ = true;
+        shutdown_completion_cb_ = cb;
+
+        // Start timeout — if phone doesn't respond, force stop anyway
+        shutdown_timer_.expires_from_now(boost::posix_time::milliseconds(timeout_ms));
+        shutdown_timer_.async_wait([this, self](const boost::system::error_code& ec) {
+            if (ec) return;  // cancelled = phone responded in time
+            if (shutdown_pending_) {
+                std::cerr << "[aasdk] graceful_shutdown: timeout, forcing stop" << std::endl;
+                shutdown_pending_ = false;
+                stop();
+                if (shutdown_completion_cb_) {
+                    auto cb = std::move(shutdown_completion_cb_);
+                    shutdown_completion_cb_ = nullptr;
+                    cb();
+                }
+            }
+        });
+
+        // Send ByeByeRequest
+        aap_protobuf::service::control::message::ByeByeRequest request;
+        request.set_reason(aap_protobuf::service::control::message::USER_SELECTION);
+        auto promise = aasdk::channel::SendPromise::defer(strand_);
+        promise->then([]() {
+            std::cerr << "[aasdk] ByeByeRequest sent OK" << std::endl;
+        }, [this, self](auto e) {
+            std::cerr << "[aasdk] ByeByeRequest send failed: " << e.what() << std::endl;
+            // Send failed — phone is probably already gone, force complete
+            shutdown_timer_.cancel();
+            shutdown_pending_ = false;
+            stop();
+            if (shutdown_completion_cb_) {
+                auto cb = std::move(shutdown_completion_cb_);
+                shutdown_completion_cb_ = nullptr;
+                cb();
+            }
+        });
+        control_channel_->sendShutdownRequest(request, std::move(promise));
     });
 }
 
@@ -772,6 +824,18 @@ void HeadlessAutoEntity::onByeByeRequest(
 void HeadlessAutoEntity::onByeByeResponse(
     const aap_protobuf::service::control::message::ByeByeResponse&)
 {
+    if (shutdown_pending_) {
+        std::cerr << "[aasdk] ByeByeResponse received — graceful shutdown complete" << std::endl;
+        shutdown_timer_.cancel();
+        shutdown_pending_ = false;
+        stop();
+        if (shutdown_completion_cb_) {
+            auto cb = std::move(shutdown_completion_cb_);
+            shutdown_completion_cb_ = nullptr;
+            cb();
+        }
+        return;
+    }
     triggerQuit();
 }
 
@@ -797,6 +861,19 @@ void HeadlessAutoEntity::onChannelError(const aasdk::error::Error& e) {
     // OPERATION_ABORTED is expected during shutdown when messenger stops
     if (e.getCode() == aasdk::error::ErrorCode::OPERATION_ABORTED) {
         std::cerr << "[aasdk] Operation aborted (expected during stop)" << std::endl;
+        return;
+    }
+    // If we're in a graceful shutdown, complete it (phone died mid-handshake)
+    if (shutdown_pending_) {
+        std::cerr << "[aasdk] Channel error during graceful shutdown — completing" << std::endl;
+        shutdown_timer_.cancel();
+        shutdown_pending_ = false;
+        stop();
+        if (shutdown_completion_cb_) {
+            auto cb = std::move(shutdown_completion_cb_);
+            shutdown_completion_cb_ = nullptr;
+            cb();
+        }
         return;
     }
     triggerQuit();
@@ -1675,32 +1752,63 @@ void LiveAasdkSession::restart_with_config(const HeadlessConfig& new_config) {
         << " codec=" << new_config.video_codec << " dpi=" << new_config.video_dpi
         << ")" << std::endl;
 
-    // Stop current entity (disconnects phone)
-    if (entity_) {
-        entity_->stop();
-        entity_.reset();
-    }
-
-    // Update config
+    // Update config first so it's ready when phone reconnects
     config_ = new_config;
 
-    // Phone will auto-reconnect via BT/WiFi and get new SDR
-    output_.emit(R"({"type":"event","event_type":"config_changed","message":"AA session restarting with new config"})");
-    state_.connected = false;
-    active_transport_ = TransportType::NONE;
+    auto finish_restart = [this]() {
+        // Phone will auto-reconnect via BT/WiFi and get new SDR
+        output_.emit(R"({"type":"event","event_type":"config_changed","message":"AA session restarting with new config"})");
+        state_.connected = false;
+        active_transport_ = TransportType::NONE;
+        entity_.reset();
 
-    // Restart both USB scanning and wireless TCP (dual mode)
-    io_service_.post([this]() {
-        if (usb_hub_ && running_) {
-            std::cerr << "[aasdk] restart: USB scan in 2s..." << std::endl;
-            auto timer = std::make_shared<boost::asio::deadline_timer>(io_service_);
-            timer->expires_from_now(boost::posix_time::seconds(2));
-            timer->async_wait([this, timer](const boost::system::error_code& ec) {
-                if (!ec && running_) start_usb_scanning();
-            });
+        // Notify OAL session that phone disconnected (sends phone_disconnected to app,
+        // cleans up audio state, etc.)
+        if (oal_session_) {
+            oal_session_->on_phone_disconnected("config_changed");
         }
-        // TCP listener is always active, new wireless connections accepted automatically
-    });
+
+        // Restart both USB scanning and wireless TCP (dual mode)
+        io_service_.post([this]() {
+            if (usb_hub_ && running_) {
+                std::cerr << "[aasdk] restart: USB scan in 2s..." << std::endl;
+                auto timer = std::make_shared<boost::asio::deadline_timer>(io_service_);
+                timer->expires_from_now(boost::posix_time::seconds(2));
+                timer->async_wait([this, timer](const boost::system::error_code& ec) {
+                    if (!ec && running_) start_usb_scanning();
+                });
+            }
+            // TCP listener is always active, new wireless connections accepted automatically
+        });
+    };
+
+    // Gracefully disconnect phone (ByeByeRequest + wait for response)
+    if (entity_ && entity_->is_active()) {
+        entity_->graceful_shutdown(std::move(finish_restart));
+    } else {
+        if (entity_) {
+            entity_->stop();
+        }
+        finish_restart();
+    }
+}
+
+void LiveAasdkSession::graceful_disconnect_phone(std::function<void()> completion_cb) {
+    if (entity_ && entity_->is_active()) {
+        std::cerr << "[aasdk] graceful_disconnect_phone: sending ByeByeRequest" << std::endl;
+        entity_->graceful_shutdown([this, cb = std::move(completion_cb)]() {
+            state_.connected = false;
+            active_transport_ = TransportType::NONE;
+            entity_.reset();
+            if (oal_session_) {
+                oal_session_->on_phone_disconnected("graceful_shutdown");
+            }
+            if (cb) cb();
+        });
+    } else {
+        std::cerr << "[aasdk] graceful_disconnect_phone: no active session" << std::endl;
+        if (completion_cb) completion_cb();
+    }
 }
 
 void LiveAasdkSession::update_config(const HeadlessConfig& new_config) {

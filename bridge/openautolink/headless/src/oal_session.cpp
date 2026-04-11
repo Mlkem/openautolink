@@ -1101,8 +1101,9 @@ void OalSession::handle_config_update(const std::string& json) {
         if (config_changed) {
 #ifdef PI_AA_ENABLE_AASDK_LIVE
             if (aa_session_) {
+                // Gracefully disconnects phone (ByeByeRequest), then restarts session.
+                // on_phone_disconnected("config_changed") is called from the completion callback.
                 aa_session_->restart_with_config(config_);
-                send_phone_disconnected("config_changed");
             }
 #endif
         }
@@ -1137,7 +1138,21 @@ void OalSession::handle_restart_services(const std::string& json) {
                  std::string(restart_wireless ? "true" : "false") +
                  R"(,"bluetooth":)" + std::string(restart_bt ? "true" : "false") + "}");
 
-    // Short delay so the event reaches the app before we die
+    // Gracefully disconnect the phone (ByeByeRequest) before restarting,
+    // so the phone sees a clean shutdown and won't show Communication Error 21.
+#ifdef PI_AA_ENABLE_AASDK_LIVE
+    if (aa_session_ && phone_connected_) {
+        std::cerr << "[OAL] restart_services: graceful phone disconnect before restart" << std::endl;
+        aa_session_->graceful_disconnect_phone([cmd]() {
+            std::cerr << "[OAL] restart_services: phone disconnected, restarting services" << std::endl;
+            usleep(200000);
+            system(cmd.c_str());
+        });
+        return;
+    }
+#endif
+
+    // No phone connected — just restart
     usleep(200000);
     system(cmd.c_str());
 }
@@ -1243,32 +1258,33 @@ void OalSession::handle_switch_phone(const std::string& json) {
 
     std::cerr << "[OAL] switching to phone: " << mac << std::endl;
 
-    // Disconnect current phone first (if connected), then connect to target.
-    // This runs asynchronously via bluetoothctl to avoid blocking the control thread.
-    // The BT script's event handler will pick up the new connection and trigger
-    // the RFCOMM WiFi credential exchange, leading to a new AA session.
-    std::string cmd = "( ";
+    // Build the BT switch command
+    std::string bt_cmd = "( ";
+    bt_cmd += "for dev in $(bluetoothctl devices Connected 2>/dev/null | awk '{print $2}'); do "
+              "bluetoothctl disconnect $dev 2>/dev/null; "
+              "done; ";
+    bt_cmd += "sleep 1; ";
+    bt_cmd += "bluetoothctl connect " + mac + " 2>/dev/null; ";
+    bt_cmd += ") &";
 
-    // Disconnect all currently connected devices
-    cmd += "for dev in $(bluetoothctl devices Connected 2>/dev/null | awk '{print $2}'); do "
-           "bluetoothctl disconnect $dev 2>/dev/null; "
-           "done; ";
+    // Gracefully disconnect phone first (ByeByeRequest), then do BT switch
+#ifdef PI_AA_ENABLE_AASDK_LIVE
+    if (aa_session_ && phone_connected_) {
+        aa_session_->graceful_disconnect_phone([this, bt_cmd]() {
+            int ret = system(bt_cmd.c_str());
+            if (ret != 0) {
+                std::cerr << "[OAL] switch_phone: command launch failed" << std::endl;
+            }
+        });
+        return;
+    }
+#endif
 
-    // Small delay for cleanup
-    cmd += "sleep 1; ";
-
-    // Connect to target device
-    cmd += "bluetoothctl connect " + mac + " 2>/dev/null; ";
-
-    cmd += ") &";
-
-    int ret = system(cmd.c_str());
+    // No phone connected — just do the BT switch
+    int ret = system(bt_cmd.c_str());
     if (ret != 0) {
         std::cerr << "[OAL] switch_phone: command launch failed" << std::endl;
     }
-
-    // Notify app that phone disconnected (the new connection will trigger
-    // a phone_connected message when the AA session starts)
     if (phone_connected_) {
         on_phone_disconnected("phone_switch");
     }
@@ -1301,21 +1317,32 @@ void OalSession::handle_forget_phone(const std::string& json) {
 
     std::cerr << "[OAL] forgetting phone: " << mac << std::endl;
 
-    // If the phone being forgotten is currently connected, disconnect first
-    std::string cmd = "bluetoothctl disconnect " + mac + " 2>/dev/null; "
-                      "bluetoothctl remove " + mac + " 2>/dev/null";
-    int ret = system(cmd.c_str());
-    if (ret != 0) {
-        std::cerr << "[OAL] forget_phone: bluetoothctl command returned " << ret << std::endl;
-    }
+    auto do_forget = [this, mac]() {
+        std::string cmd = "bluetoothctl disconnect " + mac + " 2>/dev/null; "
+                          "bluetoothctl remove " + mac + " 2>/dev/null";
+        int ret = system(cmd.c_str());
+        if (ret != 0) {
+            std::cerr << "[OAL] forget_phone: bluetoothctl command returned " << ret << std::endl;
+        }
+        // Send updated paired phones list
+        send_paired_phones();
+    };
 
-    // If we just removed the currently connected phone, notify
+    // Gracefully disconnect phone before forgetting
+#ifdef PI_AA_ENABLE_AASDK_LIVE
+    if (aa_session_ && phone_connected_) {
+        aa_session_->graceful_disconnect_phone([do_forget]() {
+            do_forget();
+        });
+        return;
+    }
+#endif
+
+    // If the phone being forgotten is currently connected but no AA session
     if (phone_connected_) {
         on_phone_disconnected("phone_forgotten");
     }
-
-    // Send updated paired phones list
-    send_paired_phones();
+    do_forget();
 }
 
 // ── Bridge update handlers ───────────────────────────────────────────
