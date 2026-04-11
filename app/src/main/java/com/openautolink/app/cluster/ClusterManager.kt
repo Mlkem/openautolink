@@ -30,6 +30,8 @@ class ClusterManager(private val context: Context) {
         private const val RETRY_DELAY_MS = 4000L
         private const val BRING_BACK_DELAY_MS = 1000L
         private const val PERMISSIONS_RETRY_DELAY_MS = 3000L
+        private const val HEALTH_CHECK_DELAY_MS = 5000L
+        private const val MAX_HEALTH_RETRIES = 3
 
         /** Runtime permissions that must be granted before launching CarAppActivity,
          *  to avoid covering the system permissions dialog. */
@@ -41,6 +43,7 @@ class ClusterManager(private val context: Context) {
 
     private val handler = Handler(Looper.getMainLooper())
     private var enabled = false
+    private var healthRetryCount = 0
 
     /**
      * Enable or disable the cluster CarAppService component.
@@ -111,6 +114,9 @@ class ClusterManager(private val context: Context) {
             Log.i(TAG, "Launched CarAppActivity for Templates Host binding")
             DiagnosticLog.i("cluster", "Launched CarAppActivity for Templates Host binding")
 
+            // Schedule health check — if session doesn't come alive, retry
+            scheduleHealthCheck()
+
             // Bring main activity back — binding is IPC-based, doesn't need foreground
             handler.postDelayed({
                 try {
@@ -132,6 +138,32 @@ class ClusterManager(private val context: Context) {
             DiagnosticLog.w("cluster", "Failed to launch CarAppActivity: ${e.message}")
             Log.i(TAG, "Cluster navigation will not be available — media metadata still flows via MediaSession")
         }
+    }
+
+    /**
+     * Schedule a health check after launching CarAppActivity.
+     * If the cluster session hasn't come alive after HEALTH_CHECK_DELAY_MS,
+     * tear down the stale task and retry the full binding chain.
+     */
+    private fun scheduleHealthCheck() {
+        handler.postDelayed({
+            if (!enabled) return@postDelayed
+            if (ClusterBindingState.sessionAlive) {
+                Log.i(TAG, "Health check: cluster session alive")
+                healthRetryCount = 0
+                return@postDelayed
+            }
+            healthRetryCount++
+            if (healthRetryCount > MAX_HEALTH_RETRIES) {
+                Log.w(TAG, "Health check: max retries ($MAX_HEALTH_RETRIES) exceeded — giving up")
+                DiagnosticLog.w("cluster", "Cluster binding failed after $MAX_HEALTH_RETRIES retries")
+                healthRetryCount = 0
+                return@postDelayed
+            }
+            Log.w(TAG, "Health check: session not alive — retry $healthRetryCount/$MAX_HEALTH_RETRIES")
+            DiagnosticLog.w("cluster", "Cluster session not alive — retrying ($healthRetryCount/$MAX_HEALTH_RETRIES)")
+            restartClusterBinding()
+        }, HEALTH_CHECK_DELAY_MS)
     }
 
     /**
@@ -168,5 +200,6 @@ class ClusterManager(private val context: Context) {
      */
     fun release() {
         handler.removeCallbacksAndMessages(null)
+        healthRetryCount = 0
     }
 }

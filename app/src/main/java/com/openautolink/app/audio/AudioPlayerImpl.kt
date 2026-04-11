@@ -7,6 +7,8 @@ import com.openautolink.app.transport.AudioPurpose
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.Timer
+import java.util.TimerTask
 
 /**
  * 5-purpose AudioTrack management — routes incoming audio frames to
@@ -32,6 +34,18 @@ class AudioPlayerImpl(private val audioManager: AudioManager) : AudioPlayer {
     companion object {
         private const val TAG = "AudioPlayerImpl"
 
+        /** Stop a purpose after this many ms with no audio frames.
+         *  Nav/assistant/alert are bursty — use shorter timeout.
+         *  Media can have brief pauses between tracks — use longer timeout. */
+        private const val IDLE_TIMEOUT_MEDIA_MS = 5000L
+        private const val IDLE_TIMEOUT_OTHER_MS = 2000L
+
+        /** How often to check for idle purposes. */
+        private const val IDLE_CHECK_INTERVAL_MS = 2000L
+
+        /** Suppress auto-start for this long after an explicit stopPurpose(). */
+        private const val AUTO_START_SUPPRESS_MS = 1000L
+
         /** Default formats per purpose — used until bridge sends audio_start. */
         private val DEFAULT_FORMATS = mapOf(
             AudioPurpose.MEDIA to AudioFormat(48000, 2),
@@ -48,6 +62,13 @@ class AudioPlayerImpl(private val audioManager: AudioManager) : AudioPlayer {
     private val slotFormats = mutableMapOf<AudioPurpose, AudioFormat>()
     private val focusManager = AudioFocusManager(audioManager)
     private val coordinator = AudioPurposeCoordinator()
+    private var idleCheckTimer: Timer? = null
+
+    /** Tracks when each purpose was explicitly stopped via stopPurpose().
+     *  Auto-start is suppressed for AUTO_START_SUPPRESS_MS after an explicit stop
+     *  to prevent straggler audio frames (arriving on a different TCP channel
+     *  after the audio_stop control message) from immediately reactivating. */
+    private val explicitStopTimes = mutableMapOf<AudioPurpose, Long>()
 
     private val _stats = MutableStateFlow(AudioStats())
     override val stats: StateFlow<AudioStats> = _stats.asStateFlow()
@@ -77,17 +98,20 @@ class AudioPlayerImpl(private val audioManager: AudioManager) : AudioPlayer {
         initialized = true
         Log.i(TAG, "Audio player initialized with ${slots.size} purpose slots")
         DiagnosticLog.i("audio", "AudioPlayer initialized with ${slots.size} purpose slots")
+        startIdleChecker()
         updateStats()
     }
 
     override fun release() {
         if (!initialized) return
 
+        stopIdleChecker()
         for ((_, slot) in slots) {
             slot.release()
         }
         slots.clear()
         slotFormats.clear()
+        explicitStopTimes.clear()
         focusManager.releaseFocus()
         coordinator.reset()
         initialized = false
@@ -113,7 +137,13 @@ class AudioPlayerImpl(private val audioManager: AudioManager) : AudioPlayer {
         // Auto-start: if audio frames arrive before audio_start control message
         // (happens when phone was already streaming before app connected),
         // start the slot with the frame's sample rate and channel count.
+        // BUT: suppress auto-start briefly after an explicit stop to prevent
+        // straggler frames from reactivating a purpose that was just stopped.
         if (!slot.isActive) {
+            val suppressUntil = explicitStopTimes[frame.purpose] ?: 0L
+            if (System.currentTimeMillis() - suppressUntil < AUTO_START_SUPPRESS_MS) {
+                return // straggler frame after explicit stop — discard
+            }
             Log.i(TAG, "Auto-starting ${frame.purpose} from audio frame: ${frame.sampleRate}Hz ${frame.channels}ch")
             startPurpose(frame.purpose, frame.sampleRate, frame.channels)
         }
@@ -145,6 +175,7 @@ class AudioPlayerImpl(private val audioManager: AudioManager) : AudioPlayer {
     override fun startPurpose(purpose: AudioPurpose, sampleRate: Int, channels: Int) {
         val existingSlot = slots[purpose]
         val requestedFmt = AudioFormat(sampleRate, channels)
+        explicitStopTimes.remove(purpose)  // clear suppression on explicit start
 
         // Check if format changed from what the slot was created with — recreate if so
         if (existingSlot != null) {
@@ -174,6 +205,7 @@ class AudioPlayerImpl(private val audioManager: AudioManager) : AudioPlayer {
     override fun stopPurpose(purpose: AudioPurpose) {
         val slot = slots[purpose] ?: return
         slot.stop()
+        explicitStopTimes[purpose] = System.currentTimeMillis()
 
         // Notify coordinator and restore volumes
         val actions = coordinator.onPurposeStopped(purpose)
@@ -276,5 +308,39 @@ class AudioPlayerImpl(private val audioManager: AudioManager) : AudioPlayer {
             maxGapMs = maxGap,
             hwUnderruns = hwUr,
         )
+    }
+
+    private fun startIdleChecker() {
+        idleCheckTimer = Timer("audio-idle-check", true).apply {
+            scheduleAtFixedRate(object : TimerTask() {
+                override fun run() {
+                    checkIdlePurposes()
+                }
+            }, IDLE_CHECK_INTERVAL_MS, IDLE_CHECK_INTERVAL_MS)
+        }
+    }
+
+    private fun stopIdleChecker() {
+        idleCheckTimer?.cancel()
+        idleCheckTimer = null
+    }
+
+    private fun checkIdlePurposes() {
+        var changed = false
+        for ((purpose, slot) in slots) {
+            if (!slot.isActive) continue
+            val idle = slot.idleMs()
+            val timeout = if (purpose == AudioPurpose.MEDIA) IDLE_TIMEOUT_MEDIA_MS else IDLE_TIMEOUT_OTHER_MS
+            if (idle >= timeout) {
+                slot.stop()
+                coordinator.onPurposeStopped(purpose)
+                Log.i(TAG, "Auto-stopped idle $purpose (idle ${idle}ms)")
+                DiagnosticLog.i("audio", "Auto-stopped idle $purpose (${idle}ms)")
+                changed = true
+            }
+        }
+        if (changed) {
+            updateStats()
+        }
     }
 }

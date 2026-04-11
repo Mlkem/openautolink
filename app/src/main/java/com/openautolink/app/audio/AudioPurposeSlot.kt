@@ -6,6 +6,8 @@ import android.media.AudioTrack
 import android.os.Process
 import android.util.Log
 import com.openautolink.app.transport.AudioPurpose
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -30,6 +32,10 @@ class AudioPurposeSlot(
 
     private var audioTrack: AudioTrack? = null
 
+    /** Per-purpose write thread — isolates blocking AudioTrack.write() calls
+     *  so one purpose stalling doesn't block others. */
+    private var writeExecutor: ExecutorService? = null
+
     private val active = AtomicBoolean(false)
     private val released = AtomicBoolean(false)
     private val pausedByFocusLoss = AtomicBoolean(false)
@@ -38,6 +44,7 @@ class AudioPurposeSlot(
     val underrunCount = AtomicLong(0)
 
     // Diagnostic counters
+    @Volatile var startedAtNs: Long = 0L
     @Volatile var lastFeedTimeNs: Long = 0L
     @Volatile var maxWriteMs: Long = 0L
     @Volatile var maxGapMs: Long = 0L
@@ -75,13 +82,26 @@ class AudioPurposeSlot(
         if (released.get() || active.get()) return
         val track = audioTrack ?: return
         active.set(true)
+        startedAtNs = System.nanoTime()
+
+        // Create per-purpose write thread with URGENT_AUDIO priority
+        writeExecutor = Executors.newSingleThreadExecutor { r ->
+            Thread(r, "AudioWrite-$purpose").apply {
+                isDaemon = true
+            }
+        }
+
         track.play()
-        Log.d(TAG, "$purpose started")
+        Log.d(TAG, "$purpose started (per-purpose write thread)")
     }
 
     fun stop() {
         pausedByFocusLoss.set(false)
         if (!active.getAndSet(false)) return
+        startedAtNs = 0L
+        lastFeedTimeNs = 0L
+        writeExecutor?.shutdown()
+        writeExecutor = null
         audioTrack?.pause()
         audioTrack?.flush()
         Log.d(TAG, "$purpose stopped")
@@ -106,39 +126,48 @@ class AudioPurposeSlot(
     val isPausedByFocus: Boolean get() = pausedByFocusLoss.get()
 
     /**
-     * Write PCM directly to AudioTrack. Called from audioDispatcher thread.
-     * Blocking write — AudioTrack paces to real-time.
-     * Each 8192-byte frame from bridge = 42.7ms of audio.
-     * The per-write overhead (~50ms on emulator) is acceptable for 42ms chunks.
+     * Submit PCM to per-purpose write thread. Non-blocking for the caller —
+     * the blocking AudioTrack.write() runs on this slot's own thread,
+     * so one purpose stalling doesn't block others.
      */
     fun feedPcm(data: ByteArray) {
-        val track = audioTrack ?: return
         if (!active.get()) return
+        val executor = writeExecutor ?: return
 
-        // Measure inter-frame gap
-        val nowNs = System.nanoTime()
-        val prevNs = lastFeedTimeNs
-        lastFeedTimeNs = nowNs
-        if (prevNs > 0) {
-            val gapMs = (nowNs - prevNs) / 1_000_000
-            if (gapMs > maxGapMs) maxGapMs = gapMs
-        }
+        executor.execute {
+            val track = audioTrack ?: return@execute
+            if (!active.get()) return@execute
 
-        // Measure AudioTrack.write() blocking duration
-        val writeStartNs = System.nanoTime()
-        track.write(data, 0, data.size) // blocking
-        val writeMs = (System.nanoTime() - writeStartNs) / 1_000_000
+            // Set thread priority on first call (executor reuses one thread)
+            if (totalWriteCalls == 0L) {
+                Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
+            }
 
-        totalWriteCalls++
-        framesWritten.addAndGet(data.size.toLong() / (channelCount * 2))
-        if (writeMs > maxWriteMs) maxWriteMs = writeMs
-        if (writeMs > 60) slowWriteCount++
+            // Measure inter-frame gap
+            val nowNs = System.nanoTime()
+            val prevNs = lastFeedTimeNs
+            lastFeedTimeNs = nowNs
+            if (prevNs > 0) {
+                val gapMs = (nowNs - prevNs) / 1_000_000
+                if (gapMs > maxGapMs) maxGapMs = gapMs
+            }
 
-        // Sample HW underrun count periodically
-        if (totalWriteCalls % 50 == 0L) {
-            try {
-                hwUnderrunCount = track.underrunCount.toLong()
-            } catch (_: Exception) {}
+            // Measure AudioTrack.write() blocking duration
+            val writeStartNs = System.nanoTime()
+            track.write(data, 0, data.size) // blocking — only blocks THIS purpose's thread
+            val writeMs = (System.nanoTime() - writeStartNs) / 1_000_000
+
+            totalWriteCalls++
+            framesWritten.addAndGet(data.size.toLong() / (channelCount * 2))
+            if (writeMs > maxWriteMs) maxWriteMs = writeMs
+            if (writeMs > 60) slowWriteCount++
+
+            // Sample HW underrun count periodically
+            if (totalWriteCalls % 50 == 0L) {
+                try {
+                    hwUnderrunCount = track.underrunCount.toLong()
+                } catch (_: Exception) {}
+            }
         }
     }
 
@@ -149,6 +178,8 @@ class AudioPurposeSlot(
     fun release() {
         if (released.getAndSet(true)) return
         stop()
+        writeExecutor?.shutdownNow()
+        writeExecutor = null
         audioTrack?.release()
         audioTrack = null
         Log.d(TAG, "$purpose released")
@@ -157,6 +188,20 @@ class AudioPurposeSlot(
     val isActive: Boolean get() = active.get()
     val ringBufferAvailable: Int get() = 0
     val ringBufferCapacity: Int get() = 0
+
+    /**
+     * How long this slot has been idle (no frames received) in ms.
+     * Returns -1 if the slot is not active.
+     */
+    fun idleMs(): Long {
+        if (!active.get()) return -1
+        val now = System.nanoTime()
+        val lastFeed = lastFeedTimeNs
+        if (lastFeed > 0) return (now - lastFeed) / 1_000_000
+        // Never received a frame — use start time
+        val started = startedAtNs
+        return if (started > 0) (now - started) / 1_000_000 else -1
+    }
 
     private fun buildAudioAttributes(purpose: AudioPurpose): AudioAttributes {
         val usage = when (purpose) {

@@ -128,24 +128,6 @@ void OalSession::on_phone_connected(const std::string& phone_name,
 void OalSession::on_phone_disconnected(const std::string& reason) {
     phone_connected_ = false;
     session_active_ = false;
-
-    // Send audio_stop for all active purposes before phone_disconnected
-    // so the app can clean up AudioTracks even if phone died abruptly
-    {
-        std::lock_guard<std::mutex> lock(audio_purposes_mutex_);
-        if (app_connected_ && !active_audio_purposes_.empty()) {
-            for (const auto& ap : active_audio_purposes_) {
-                std::ostringstream oss;
-                oss << R"({"type":"audio_stop","purpose":")"
-                    << oal_purpose_to_string(ap.purpose) << R"("})";
-                send_control_line(oss.str());
-            }
-            std::cerr << "[OAL] sent audio_stop for " << active_audio_purposes_.size()
-                      << " active purposes on phone disconnect" << std::endl;
-        }
-        active_audio_purposes_.clear();
-    }
-
     if (app_connected_) {
         send_phone_disconnected(reason);
     }
@@ -234,18 +216,14 @@ void OalSession::write_audio_frame(
     bool ok = audio_transport_.submit_write(pkt.data(), pkt.size());
     if (ok) {
         audio_frames_written_++;
-        if (audio_frames_written_ <= 10 || audio_frames_written_ % 200 == 0) {
+        if (audio_frames_written_ <= 10 || audio_frames_written_ % 50 == 0) {
             std::cerr << "[OAL] audio: written=" << audio_frames_written_
-                      << " drops=" << audio_frames_queued_
-                      << " purpose=" << oal_purpose_to_string(purpose)
                       << " size=" << pkt.size() << std::endl;
         }
     } else {
         audio_frames_queued_++; // count drops
-        if (audio_frames_queued_ <= 10 || audio_frames_queued_ % 50 == 0) {
+        if (audio_frames_queued_ <= 5 || audio_frames_queued_ % 100 == 0) {
             std::cerr << "[OAL] audio WRITE FAILED: drops=" << audio_frames_queued_
-                      << " total_ok=" << audio_frames_written_
-                      << " purpose=" << oal_purpose_to_string(purpose)
                       << " connected=" << audio_transport_.is_connected() << std::endl;
         }
     }
@@ -357,16 +335,11 @@ void OalSession::send_hello() {
         << oal_json_escape(config_.head_unit_name)
         << R"(","capabilities":[)" << caps
         << R"(],"video_port":5290,"audio_port":5289)"
-        << R"(,"protocol_version":)" << OAL_PROTOCOL_VERSION
-        << R"(,"min_protocol_version":)" << OAL_MIN_PROTOCOL_VERSION
         << R"(,"bridge_version":")" << oal_json_escape(config_.bridge_version)
         << R"(","bridge_sha256":")" << binary_sha256_cache_
-        << R"(","build_source":")" << oal_json_escape(config_.build_source)
         << R"("})";
     send_control_line(oss.str());
-    std::cerr << "[OAL] sent hello (bridge " << config_.bridge_version
-              << ", protocol v" << OAL_PROTOCOL_VERSION
-              << ", build_source=" << config_.build_source << ")" << std::endl;
+    std::cerr << "[OAL] sent hello (bridge " << config_.bridge_version << ")" << std::endl;
 }
 
 void OalSession::send_phone_connected(const std::string& phone_name,
@@ -406,15 +379,6 @@ void OalSession::send_audio_start(uint8_t purpose, uint16_t sample_rate, uint8_t
 }
 
 void OalSession::send_audio_stop(uint8_t purpose) {
-    // Remove from active purposes so reconnect replay doesn't resurrect stopped audio
-    {
-        std::lock_guard<std::mutex> lock(audio_purposes_mutex_);
-        active_audio_purposes_.erase(
-            std::remove_if(active_audio_purposes_.begin(), active_audio_purposes_.end(),
-                [purpose](const AudioPurposeInfo& info) { return info.purpose == purpose; }),
-            active_audio_purposes_.end());
-    }
-
     std::ostringstream oss;
     oss << R"({"type":"audio_stop","purpose":")"
         << oal_purpose_to_string(purpose) << R"("})";
@@ -475,7 +439,6 @@ void OalSession::send_media_metadata(const std::string& title, const std::string
 void OalSession::send_config_echo() {
     std::string codec_name;
     switch (config_.video_codec) {
-        case 0: codec_name = "auto"; break;
         case 3: codec_name = "h264"; break;
         case 5: codec_name = "vp9"; break;
         case 7: codec_name = "h265"; break;
@@ -483,7 +446,6 @@ void OalSession::send_config_echo() {
     }
     std::string res_name;
     switch (config_.aa_resolution_tier) {
-        case 0: res_name = "auto"; break;
         case 1: res_name = "480p"; break;
         case 2: res_name = "720p"; break;
         case 3: res_name = "1080p"; break;
@@ -500,24 +462,8 @@ void OalSession::send_config_echo() {
         << R"(,"video_fps":)" << config_.video_fps
         << R"(,"video_dpi":)" << config_.video_dpi
         << R"(,"aa_resolution":")" << res_name
-        << R"(","aa_width_margin":)" << config_.aa_ui_experiment.width_margin
-        << R"(,"aa_height_margin":)" << config_.aa_ui_experiment.height_margin
-        << R"(,"aa_pixel_aspect":)" << config_.aa_ui_experiment.pixel_aspect_ratio_e4
-        << R"(,"drive_side":")" << (config_.left_hand_drive ? "left" : "right")
+        << R"(","drive_side":")" << (config_.left_hand_drive ? "left" : "right")
         << R"(","head_unit_name":")" << oal_json_escape(config_.head_unit_name)
-        << R"(","hide_clock":)" << (config_.hide_clock ? "true" : "false")
-        << R"(,"hide_phone_signal":)" << (config_.hide_phone_signal ? "true" : "false")
-        << R"(,"hide_battery_level":)" << (config_.hide_battery_level ? "true" : "false")
-        << R"(,"aa_stable_insets":")"
-            << config_.aa_ui_experiment.initial_stable_insets.top << ","
-            << config_.aa_ui_experiment.initial_stable_insets.bottom << ","
-            << config_.aa_ui_experiment.initial_stable_insets.left << ","
-            << config_.aa_ui_experiment.initial_stable_insets.right
-        << R"(","aa_content_insets":")"
-            << config_.aa_ui_experiment.initial_content_insets.top << ","
-            << config_.aa_ui_experiment.initial_content_insets.bottom << ","
-            << config_.aa_ui_experiment.initial_content_insets.left << ","
-            << config_.aa_ui_experiment.initial_content_insets.right
         << R"("})";
     send_control_line(oss.str());
     std::cerr << "[OAL] config echo sent" << std::endl;
@@ -612,10 +558,7 @@ void OalSession::handle_app_hello(const std::string& json) {
 
     if (display_w > 0) config_.video_width = display_w;
     if (display_h > 0) config_.video_height = display_h;
-    // Don't overwrite video_dpi with device display DPI — video_dpi is the
-    // AA UI density configured via CLI/env (e.g., 160). Device DPI (e.g., 200)
-    // is for display metrics only. Overwriting would cause a config diff when
-    // the app sends its configured AA DPI via config_update → spurious restart.
+    if (display_dpi > 0) config_.video_dpi = display_dpi;
 
     // Read display cutout insets (physically curved/missing screen areas)
     int cut_top = 0, cut_bottom = 0, cut_left = 0, cut_right = 0;
@@ -653,30 +596,24 @@ void OalSession::handle_app_hello(const std::string& json) {
             case 5: video_w = 3840; video_h = 2160; break;
         }
 
-        // pixel_aspect_ratio: NOT auto-computed. In letterbox mode (default),
-        // the SurfaceView is 16:9 so pixel_aspect must be 0 (square pixels).
-        // In crop mode, the user sets it via Settings → Video → Pixel Aspect.
-        // Auto-computing here would break letterbox after Save & Restart
-        // because the value leaks into the config and gets sent in the SDR.
+        // pixel_aspect_ratio: NOT auto-computed — leave at 0 (square pixels)
+        // by default. User can override via Settings → Video → Pixel Aspect.
+        // Auto-computing caused double-stretch when combined with crop mode.
         if (config_.aa_ui_experiment.pixel_aspect_ratio_e4 > 0) {
             std::cerr << "[OAL] pixel_aspect_ratio=" << config_.aa_ui_experiment.pixel_aspect_ratio_e4
-                      << " (from env/override)" << std::endl;
+                      << " (manual override)" << std::endl;
         }
 
-        // height_margin: NOT auto-computed (AA ignores it for nav bar chrome).
+        // height_margin: NOT auto-computed for letterbox mode (no cropping).
         // User can override via Settings for experimentation.
         if (config_.aa_ui_experiment.height_margin > 0) {
             std::cerr << "[OAL] height_margin=" << config_.aa_ui_experiment.height_margin
                       << " (manual override)" << std::endl;
         }
 
-        // Auto stable_insets from display cutout.
-        // These tell AA where the physical screen curves/slopes are (in video coords).
-        // In fullscreen, the video fills the entire framebuffer so AA needs these
-        // to keep buttons away from physical curves. In system_ui_visible, the app
-        // pads the SurfaceView to the safe area so stable_insets are less critical,
-        // but we still set them for completeness.
-        if (cut_top > 0 || cut_left > 0 || cut_right > 0 || cut_bottom > 0) {
+        // Auto stable_insets from display cutout only.
+        // With letterbox, scale = display_h / video_h (height fills, bars on sides).
+        if (cut_top > 0 || cut_bottom > 0 || cut_left > 0 || cut_right > 0) {
             double letterbox_scale = static_cast<double>(display_h) / video_h;
 
             int safe_top = (cut_top > 0) ? static_cast<int>(cut_top / letterbox_scale) : 0;
@@ -698,15 +635,6 @@ void OalSession::handle_app_hello(const std::string& json) {
                       << std::endl;
         }
     }
-
-    // Push auto-computed config to the live AA session so the SDR
-    // includes pixel_aspect, stable_insets, etc. Without this, the
-    // LiveAasdkSession uses its initial config copy which has 0s.
-#ifdef PI_AA_ENABLE_AASDK_LIVE
-    if (aa_session_) {
-        aa_session_->update_config(config_);
-    }
-#endif
 
     // Send config echo so app knows current bridge settings
     send_config_echo();
@@ -860,8 +788,7 @@ void OalSession::handle_config_update(const std::string& json) {
     std::string codec = oal_json_extract_string(json, "video_codec");
     if (!codec.empty()) {
         int new_codec = config_.video_codec;
-        if (codec == "auto") new_codec = 0;
-        else if (codec == "h264") new_codec = 3;
+        if (codec == "h264") new_codec = 3;
         else if (codec == "h265") new_codec = 7;
         else if (codec == "vp9") new_codec = 5;
         if (new_codec != config_.video_codec) {
@@ -879,8 +806,7 @@ void OalSession::handle_config_update(const std::string& json) {
     std::string aa_res = oal_json_extract_string(json, "aa_resolution");
     if (!aa_res.empty()) {
         int tier = config_.aa_resolution_tier;
-        if (aa_res == "auto") tier = 0;
-        else if (aa_res == "480p") tier = 1;
+        if (aa_res == "480p") tier = 1;
         else if (aa_res == "720p") tier = 2;
         else if (aa_res == "1080p") tier = 3;
         else if (aa_res == "1440p") tier = 4;
@@ -912,7 +838,7 @@ void OalSession::handle_config_update(const std::string& json) {
         std::cerr << "[OAL] height_margin override: " << hm << std::endl;
     }
     int pa = 0;
-    if (oal_json_extract_int(json, "aa_pixel_aspect", pa) && pa > 0 &&
+    if (oal_json_extract_int(json, "aa_pixel_aspect", pa) && pa >= 0 &&
         pa != static_cast<int>(config_.aa_ui_experiment.pixel_aspect_ratio_e4)) {
         config_.aa_ui_experiment.pixel_aspect_ratio_e4 = pa;
         config_changed = true;
@@ -995,15 +921,11 @@ void OalSession::handle_config_update(const std::string& json) {
             insets.bottom = std::max(insets.bottom, floor.bottom);
             insets.left = std::max(insets.left, floor.left);
             insets.right = std::max(insets.right, floor.right);
-            auto& cur = config_.aa_ui_experiment.initial_stable_insets;
-            if (insets.top != cur.top || insets.bottom != cur.bottom ||
-                insets.left != cur.left || insets.right != cur.right) {
-                cur = insets;
-                config_changed = true;
-                std::cerr << "[OAL] safe area insets updated: "
-                          << "T:" << insets.top << " B:" << insets.bottom
-                          << " L:" << insets.left << " R:" << insets.right << std::endl;
-            }
+            config_.aa_ui_experiment.initial_stable_insets = insets;
+            config_changed = true;
+            std::cerr << "[OAL] safe area insets updated (merged with cutout floor): "
+                      << "T:" << insets.top << " B:" << insets.bottom
+                      << " L:" << insets.left << " R:" << insets.right << std::endl;
         }
     }
 
@@ -1011,13 +933,9 @@ void OalSession::handle_config_update(const std::string& json) {
     if (!content_insets.empty()) {
         HeadlessConfig::UiInsets insets;
         if (parse_insets(content_insets, insets)) {
-            auto& cur = config_.aa_ui_experiment.initial_content_insets;
-            if (insets.top != cur.top || insets.bottom != cur.bottom ||
-                insets.left != cur.left || insets.right != cur.right) {
-                cur = insets;
-                config_changed = true;
-                std::cerr << "[OAL] content insets updated: " << content_insets << std::endl;
-            }
+            config_.aa_ui_experiment.initial_content_insets = insets;
+            config_changed = true;
+            std::cerr << "[OAL] content insets updated: " << content_insets << std::endl;
         }
     }
 
@@ -1063,13 +981,6 @@ void OalSession::handle_config_update(const std::string& json) {
             env_update += "sed -i 's/^OAL_AA_RESOLUTION=.*/OAL_AA_RESOLUTION=" + sanitize(aa_res) + "/' /etc/openautolink.env 2>/dev/null\n";
         if (dpi > 0)
             env_update += "sed -i 's/^OAL_AA_DPI=.*/OAL_AA_DPI=" + std::to_string(dpi) + "/' /etc/openautolink.env 2>/dev/null\n";
-        // Margin/pixel_aspect overrides: >0 writes value, 0 writes blank (= auto on next boot)
-        {
-            auto margin_to_env = [](int val) -> std::string { return val > 0 ? std::to_string(val) : ""; };
-            env_update += "sed -i 's/^OAL_AA_WIDTH_MARGIN=.*/OAL_AA_WIDTH_MARGIN=" + margin_to_env(wm) + "/' /etc/openautolink.env 2>/dev/null\n";
-            env_update += "sed -i 's/^OAL_AA_HEIGHT_MARGIN=.*/OAL_AA_HEIGHT_MARGIN=" + margin_to_env(hm) + "/' /etc/openautolink.env 2>/dev/null\n";
-            env_update += "sed -i 's/^OAL_AA_PIXEL_ASPECT_E4=.*/OAL_AA_PIXEL_ASPECT_E4=" + margin_to_env(pa) + "/' /etc/openautolink.env 2>/dev/null\n";
-        }
         if (!phone_mode.empty())
             env_update += "sed -i 's/^OAL_PHONE_MODE=.*/OAL_PHONE_MODE=" + sanitize(phone_mode) + "/' /etc/openautolink.env 2>/dev/null\n";
         if (!wifi_band.empty())
@@ -1101,9 +1012,8 @@ void OalSession::handle_config_update(const std::string& json) {
         if (config_changed) {
 #ifdef PI_AA_ENABLE_AASDK_LIVE
             if (aa_session_) {
-                // Gracefully disconnects phone (ByeByeRequest), then restarts session.
-                // on_phone_disconnected("config_changed") is called from the completion callback.
                 aa_session_->restart_with_config(config_);
+                send_phone_disconnected("config_changed");
             }
 #endif
         }
@@ -1117,6 +1027,13 @@ void OalSession::handle_restart_services(const std::string& json) {
     // The app sends this after config_update to force the phone to renegotiate (e.g., codec change).
     bool restart_wireless = oal_json_extract_string(json, "wireless") == "true";
     bool restart_bt = oal_json_extract_string(json, "bluetooth") == "true";
+
+    // If wireless restarts, the phone loses WiFi. BT must also restart
+    // to trigger the AA RFCOMM credential exchange — that's the only
+    // mechanism that makes the phone reconnect to the bridge's WiFi AP.
+    if (restart_wireless) {
+        restart_bt = true;
+    }
 
     std::cerr << "[OAL] restart_services: wireless=" << restart_wireless
               << " bt=" << restart_bt << std::endl;
@@ -1138,21 +1055,7 @@ void OalSession::handle_restart_services(const std::string& json) {
                  std::string(restart_wireless ? "true" : "false") +
                  R"(,"bluetooth":)" + std::string(restart_bt ? "true" : "false") + "}");
 
-    // Gracefully disconnect the phone (ByeByeRequest) before restarting,
-    // so the phone sees a clean shutdown and won't show Communication Error 21.
-#ifdef PI_AA_ENABLE_AASDK_LIVE
-    if (aa_session_ && phone_connected_) {
-        std::cerr << "[OAL] restart_services: graceful phone disconnect before restart" << std::endl;
-        aa_session_->graceful_disconnect_phone([cmd]() {
-            std::cerr << "[OAL] restart_services: phone disconnected, restarting services" << std::endl;
-            usleep(200000);
-            system(cmd.c_str());
-        });
-        return;
-    }
-#endif
-
-    // No phone connected — just restart
+    // Short delay so the event reaches the app before we die
     usleep(200000);
     system(cmd.c_str());
 }
@@ -1258,33 +1161,32 @@ void OalSession::handle_switch_phone(const std::string& json) {
 
     std::cerr << "[OAL] switching to phone: " << mac << std::endl;
 
-    // Build the BT switch command
-    std::string bt_cmd = "( ";
-    bt_cmd += "for dev in $(bluetoothctl devices Connected 2>/dev/null | awk '{print $2}'); do "
-              "bluetoothctl disconnect $dev 2>/dev/null; "
-              "done; ";
-    bt_cmd += "sleep 1; ";
-    bt_cmd += "bluetoothctl connect " + mac + " 2>/dev/null; ";
-    bt_cmd += ") &";
+    // Disconnect current phone first (if connected), then connect to target.
+    // This runs asynchronously via bluetoothctl to avoid blocking the control thread.
+    // The BT script's event handler will pick up the new connection and trigger
+    // the RFCOMM WiFi credential exchange, leading to a new AA session.
+    std::string cmd = "( ";
 
-    // Gracefully disconnect phone first (ByeByeRequest), then do BT switch
-#ifdef PI_AA_ENABLE_AASDK_LIVE
-    if (aa_session_ && phone_connected_) {
-        aa_session_->graceful_disconnect_phone([this, bt_cmd]() {
-            int ret = system(bt_cmd.c_str());
-            if (ret != 0) {
-                std::cerr << "[OAL] switch_phone: command launch failed" << std::endl;
-            }
-        });
-        return;
-    }
-#endif
+    // Disconnect all currently connected devices
+    cmd += "for dev in $(bluetoothctl devices Connected 2>/dev/null | awk '{print $2}'); do "
+           "bluetoothctl disconnect $dev 2>/dev/null; "
+           "done; ";
 
-    // No phone connected — just do the BT switch
-    int ret = system(bt_cmd.c_str());
+    // Small delay for cleanup
+    cmd += "sleep 1; ";
+
+    // Connect to target device
+    cmd += "bluetoothctl connect " + mac + " 2>/dev/null; ";
+
+    cmd += ") &";
+
+    int ret = system(cmd.c_str());
     if (ret != 0) {
         std::cerr << "[OAL] switch_phone: command launch failed" << std::endl;
     }
+
+    // Notify app that phone disconnected (the new connection will trigger
+    // a phone_connected message when the AA session starts)
     if (phone_connected_) {
         on_phone_disconnected("phone_switch");
     }
@@ -1317,32 +1219,21 @@ void OalSession::handle_forget_phone(const std::string& json) {
 
     std::cerr << "[OAL] forgetting phone: " << mac << std::endl;
 
-    auto do_forget = [this, mac]() {
-        std::string cmd = "bluetoothctl disconnect " + mac + " 2>/dev/null; "
-                          "bluetoothctl remove " + mac + " 2>/dev/null";
-        int ret = system(cmd.c_str());
-        if (ret != 0) {
-            std::cerr << "[OAL] forget_phone: bluetoothctl command returned " << ret << std::endl;
-        }
-        // Send updated paired phones list
-        send_paired_phones();
-    };
-
-    // Gracefully disconnect phone before forgetting
-#ifdef PI_AA_ENABLE_AASDK_LIVE
-    if (aa_session_ && phone_connected_) {
-        aa_session_->graceful_disconnect_phone([do_forget]() {
-            do_forget();
-        });
-        return;
+    // If the phone being forgotten is currently connected, disconnect first
+    std::string cmd = "bluetoothctl disconnect " + mac + " 2>/dev/null; "
+                      "bluetoothctl remove " + mac + " 2>/dev/null";
+    int ret = system(cmd.c_str());
+    if (ret != 0) {
+        std::cerr << "[OAL] forget_phone: bluetoothctl command returned " << ret << std::endl;
     }
-#endif
 
-    // If the phone being forgotten is currently connected but no AA session
+    // If we just removed the currently connected phone, notify
     if (phone_connected_) {
         on_phone_disconnected("phone_forgotten");
     }
-    do_forget();
+
+    // Send updated paired phones list
+    send_paired_phones();
 }
 
 // ── Bridge update handlers ───────────────────────────────────────────

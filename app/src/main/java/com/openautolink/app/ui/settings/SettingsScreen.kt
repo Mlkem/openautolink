@@ -49,7 +49,6 @@ import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -57,7 +56,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -1320,64 +1318,23 @@ private fun VideoTab(viewModel: SettingsViewModel, uiState: SettingsUiState) {
             .fillMaxSize()
             .verticalScroll(rememberScrollState()),
     ) {
-        SectionHeader("Video Negotiation")
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        Text(
-            text = "When enabled, the phone picks the best codec and resolution it supports. " +
-                    "Disable to manually choose a specific codec and resolution.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 12.dp)
-        )
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth(0.7f)
-                .clickable { viewModel.updateVideoAutoNegotiate(!uiState.videoAutoNegotiate) }
-                .padding(vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Switch(
-                checked = uiState.videoAutoNegotiate,
-                onCheckedChange = { viewModel.updateVideoAutoNegotiate(it) }
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                text = if (uiState.videoAutoNegotiate) "Auto (Recommended)" else "Manual",
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-
-        if (!uiState.videoAutoNegotiate) {
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        HorizontalDivider(modifier = Modifier.fillMaxWidth(0.7f))
-
-        Spacer(modifier = Modifier.height(24.dp))
-
         SectionHeader("Video Codec")
 
         Spacer(modifier = Modifier.height(4.dp))
 
         Text(
             text = "Video codec the phone uses to encode the AA stream. " +
-                    "H.265 is recommended for 1440p/4K. H.264 may work at higher resolutions " +
-                    "depending on your phone.",
+                    "H.264 is the safest choice. H.265 and VP9 support varies by phone.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        val isHighRes = uiState.aaResolution in listOf("1440p", "4k")
         listOf(
-            Triple("h264", "H.264", if (isHighRes) "" else " (Recommended)"),
-            Triple("h265", "H.265 / HEVC", if (isHighRes) " (Recommended)" else ""),
-            Triple("vp9", "VP9", ""),
-        ).forEach { (key, label, suffix) ->
+            "h264" to "H.264 (Recommended)",
+            "h265" to "H.265 / HEVC",
+            "vp9" to "VP9",
+        ).forEach { (key, label) ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth(0.7f)
@@ -1392,7 +1349,7 @@ private fun VideoTab(viewModel: SettingsViewModel, uiState: SettingsUiState) {
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
-                    text = label + suffix,
+                    text = label,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = if (uiState.videoCodec == key) FontWeight.SemiBold else FontWeight.Normal,
                 )
@@ -1452,8 +1409,7 @@ private fun VideoTab(viewModel: SettingsViewModel, uiState: SettingsUiState) {
 
         Text(
             text = "Resolution tier the phone encodes at. Higher = better quality, more bandwidth. " +
-                    "H.265 or VP9 recommended for 1440p/4K. Phone AA developer settings may need " +
-                    "to be enabled for resolutions above 1080p.",
+                    "Resolutions above 1080p are in the AA spec but may not be supported by your phone.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 12.dp)
@@ -1465,7 +1421,7 @@ private fun VideoTab(viewModel: SettingsViewModel, uiState: SettingsUiState) {
             Triple("1080p", "1080p (1920×1080)", false),
             Triple("1440p", "1440p (2560×1440)", true),
             Triple("4k", "4K (3840×2160)", true),
-        ).forEach { (key, label, isHighRes) ->
+        ).forEach { (key, label, isUntested) ->
             val warningColor = Color(0xFFFFB74D)
             Row(
                 modifier = Modifier
@@ -1485,11 +1441,11 @@ private fun VideoTab(viewModel: SettingsViewModel, uiState: SettingsUiState) {
                         text = label,
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = if (uiState.aaResolution == key) FontWeight.SemiBold else FontWeight.Normal,
-                        color = if (isHighRes) warningColor else Color.Unspecified,
+                        color = if (isUntested) warningColor else Color.Unspecified,
                     )
-                    if (isHighRes) {
+                    if (isUntested) {
                         Text(
-                            text = "AA Developer Mode required on phone",
+                            text = "Untested — phone may ignore this resolution",
                             style = MaterialTheme.typography.bodySmall,
                             color = warningColor,
                         )
@@ -1497,8 +1453,6 @@ private fun VideoTab(viewModel: SettingsViewModel, uiState: SettingsUiState) {
                 }
             }
         }
-
-        } // end if (!videoAutoNegotiate)
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -1511,79 +1465,39 @@ private fun VideoTab(viewModel: SettingsViewModel, uiState: SettingsUiState) {
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        val recommendedDpi = when (uiState.aaResolution) {
-            "480p" -> 80
-            "720p" -> 107
-            "1440p" -> 213
-            "4k" -> 320
-            else -> 160
-        }
-
         Text(
-            text = "Controls how Android Auto sizes its UI elements. " +
-                    "160 is standard for 1080p. For higher resolutions, scale DPI proportionally " +
-                    "to keep UI elements the same visual size (e.g. 320 for 4K). " +
-                    "Lower = more content, smaller controls. Higher = bigger controls, less content.",
+            text = "Controls how Android Auto lays out its UI. " +
+                    "Lower = more content visible, smaller controls. " +
+                    "Higher = bigger controls, less content.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        if (!uiState.videoAutoNegotiate && uiState.aaResolution != "1080p" && uiState.aaDpi != recommendedDpi) {
-            Text(
-                text = "Recommended for ${uiState.aaResolution}: $recommendedDpi DPI (tap to apply)",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFF64B5F6),
+        listOf(
+            120 to "120 — Ultra-wide, tiny controls",
+            160 to "160 — Standard (Recommended)",
+            200 to "200 — Compact, larger controls",
+            240 to "240 — Large, phone-like layout",
+        ).forEach { (dpi, label) ->
+            Row(
                 modifier = Modifier
-                    .padding(bottom = 8.dp)
-                    .clickable { viewModel.updateAaDpi(recommendedDpi) }
-            )
-        }
-
-        // Slider for custom DPI (80-400 range)
-        var sliderDpi by remember(uiState.aaDpi) { mutableIntStateOf(uiState.aaDpi) }
-        Text(
-            text = "DPI: $sliderDpi",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(bottom = 4.dp)
-        )
-        Slider(
-            value = sliderDpi.toFloat(),
-            onValueChange = { sliderDpi = it.toInt() },
-            onValueChangeFinished = { viewModel.updateAaDpi(sliderDpi) },
-            valueRange = 80f..400f,
-            steps = 0,
-            modifier = Modifier.fillMaxWidth(0.7f)
-        )
-
-        // Quick presets — laid out as chips, not aligned to slider
-        Row(
-            modifier = Modifier
-                .fillMaxWidth(0.7f)
-                .padding(top = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            listOf(120, 160, 200, 240, 320).forEach { preset ->
-                val isSelected = uiState.aaDpi == preset
-                Surface(
-                    shape = MaterialTheme.shapes.small,
-                    color = if (isSelected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.clickable {
-                        sliderDpi = preset
-                        viewModel.updateAaDpi(preset)
-                    }
-                ) {
-                    Text(
-                        text = "$preset",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                    )
-                }
+                    .fillMaxWidth(0.7f)
+                    .clickable { viewModel.updateAaDpi(dpi) }
+                    .padding(vertical = 10.dp)
+                    .testTag("aaDpi_$dpi"),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                RadioButton(
+                    selected = uiState.aaDpi == dpi,
+                    onClick = { viewModel.updateAaDpi(dpi) }
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (uiState.aaDpi == dpi) FontWeight.SemiBold else FontWeight.Normal,
+                )
             }
         }
 
@@ -1599,7 +1513,7 @@ private fun VideoTab(viewModel: SettingsViewModel, uiState: SettingsUiState) {
         Spacer(modifier = Modifier.height(4.dp))
 
         Text(
-            text = "How the video fits your screen. " +
+            text = "How the 1920×1080 video fits your screen. " +
                     "Letterbox shows the full frame with black bars on the sides. " +
                     "Crop fills the screen but cuts off top/bottom. " +
                     "Requires reconnect (Save & Restart).",
@@ -1610,7 +1524,7 @@ private fun VideoTab(viewModel: SettingsViewModel, uiState: SettingsUiState) {
 
         listOf(
             "letterbox" to "Letterbox (no crop, black bars on sides)",
-            "crop" to "Fill screen (set Pixel Aspect for correct proportions)",
+            "crop" to "Crop to fill (fills screen, cuts top/bottom)",
         ).forEach { (key, label) ->
             Row(
                 modifier = Modifier
@@ -1717,7 +1631,7 @@ private fun VideoTab(viewModel: SettingsViewModel, uiState: SettingsUiState) {
                     style = MaterialTheme.typography.bodyLarge,
                 )
                 Text(
-                    text = "×10000. 0 = auto from display. Only set to override.",
+                    text = "×10000. 10000=square. ${(2914f / 1134f * 10000 / (1920f / 1080f)).toInt()}=your display.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1728,7 +1642,7 @@ private fun VideoTab(viewModel: SettingsViewModel, uiState: SettingsUiState) {
                     val v = value.filter { it.isDigit() }.toIntOrNull() ?: 0
                     viewModel.updateAaPixelAspect(v.coerceIn(0, 30000))
                 },
-                placeholder = { Text("0 (auto)") },
+                placeholder = { Text("0 (square)") },
                 singleLine = true,
                 modifier = Modifier.width(120.dp).testTag("aaPixelAspect"),
             )

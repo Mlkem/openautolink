@@ -13,10 +13,8 @@ import kotlinx.serialization.json.jsonPrimitive
 sealed class ControlMessage {
 
     companion object {
-        /** Current OAL protocol version this app speaks. */
+        /** App's protocol version — increment when adding breaking changes. */
         const val PROTOCOL_VERSION = 1
-        /** Oldest protocol version this app can talk to. */
-        const val MIN_PROTOCOL_VERSION = 1
     }
 
     // Bridge → App
@@ -139,8 +137,6 @@ sealed class ControlMessage {
         val barBottom: Int = 0,
         val barLeft: Int = 0,
         val barRight: Int = 0,
-        val protocolVersion: Int = PROTOCOL_VERSION,
-        val minProtocolVersion: Int = MIN_PROTOCOL_VERSION,
     ) : ControlMessage()
 
     data class Touch(

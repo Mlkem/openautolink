@@ -49,6 +49,7 @@ class AudioPurposeCoordinator {
      * Notify the coordinator that a purpose has started.
      * Returns a list of volume actions the caller should apply.
      */
+    @Synchronized
     fun onPurposeStarted(purpose: AudioPurpose): List<VolumeAction> {
         activePurposes.add(purpose)
         updateCallState()
@@ -59,6 +60,7 @@ class AudioPurposeCoordinator {
      * Notify the coordinator that a purpose has stopped.
      * Returns a list of volume actions the caller should apply.
      */
+    @Synchronized
     fun onPurposeStopped(purpose: AudioPurpose): List<VolumeAction> {
         activePurposes.remove(purpose)
         updateCallState()
@@ -66,12 +68,14 @@ class AudioPurposeCoordinator {
     }
 
     /** Reset all state (session end or phone disconnect). */
+    @Synchronized
     fun reset() {
         activePurposes.clear()
         _callState.value = CallState.IDLE
     }
 
     /** Current set of active purposes (for testing/diagnostics). */
+    @Synchronized
     fun activePurposes(): Set<AudioPurpose> = activePurposes.toSet()
 
     private fun updateCallState() {
