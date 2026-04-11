@@ -25,13 +25,36 @@ if [ "${1:-}" = "clean" ]; then
 fi
 
 # ── Sync sources into WSL native filesystem ──────────────────────────
+# Use --checksum so only files with actual content changes get updated.
+# This preserves timestamps on unchanged files, letting CMake skip
+# recompilation of protobuf and aasdk (which take the bulk of build time).
 echo "=== Cross-compiling bridge for ARM64 ==="
 echo "  Syncing sources to WSL filesystem..."
 
 mkdir -p "$WSL_SRC/bridge/openautolink" "$WSL_SRC/external"
-rsync -a --delete "$REPO_ROOT/bridge/openautolink/headless/" "$WSL_SRC/bridge/openautolink/headless/"
-rsync -a --delete "$REPO_ROOT/external/opencardev-aasdk/" "$WSL_SRC/external/opencardev-aasdk/"
-rsync -a --delete "$REPO_ROOT/external/opencardev-openauto/" "$WSL_SRC/external/opencardev-openauto/"
+
+# Bridge headless code — changes often, always sync
+rsync -a --checksum --delete "$REPO_ROOT/bridge/openautolink/headless/" "$WSL_SRC/bridge/openautolink/headless/"
+
+# aasdk and openauto — submodules that rarely change.
+# Only sync if the submodule HEAD changed (or not yet synced).
+_sync_if_changed() {
+    local src="$1" dst="$2" name="$3"
+    local src_head dst_head=""
+    src_head=$(git -C "$src" rev-parse HEAD 2>/dev/null || echo "unknown")
+    if [ -f "$dst/.synced_head" ]; then
+        dst_head=$(cat "$dst/.synced_head")
+    fi
+    if [ "$src_head" != "$dst_head" ] || [ ! -d "$dst" ]; then
+        echo "  Syncing $name ($src_head)..."
+        rsync -a --checksum --delete "$src/" "$dst/"
+        echo "$src_head" > "$dst/.synced_head"
+    else
+        echo "  $name unchanged ($src_head), skipping sync"
+    fi
+}
+_sync_if_changed "$REPO_ROOT/external/opencardev-aasdk" "$WSL_SRC/external/opencardev-aasdk" "aasdk"
+_sync_if_changed "$REPO_ROOT/external/opencardev-openauto" "$WSL_SRC/external/opencardev-openauto" "openauto"
 
 HEADLESS_DIR="${WSL_SRC}/bridge/openautolink/headless"
 AASDK_DIR="${WSL_SRC}/external/opencardev-aasdk"

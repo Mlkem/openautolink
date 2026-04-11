@@ -52,18 +52,18 @@ WIFI_IP = "192.168.43.1"
 WIFI_PORT = int(os.environ.get("OAL_PHONE_TCP_PORT", os.environ.get("PI_AA_BACKEND_TCP_PORT", "5277")))
 WIFI_BSSID = "00:00:00:00:00:00"  # filled at runtime from wlan0 MAC
 
-# BT name — auto-generated from BT MAC suffix to be unique per SBC
+# BT name — unique per SBC, derived from machine-id (always available on any Linux)
 def _get_bt_name():
     name = os.environ.get("OAL_BT_NAME", "")
     if name:
         return name
-    # Derive from BT adapter MAC (last 4 hex chars)
+    # Use last 4 hex chars of machine-id — unique per OS install, always present
     try:
-        with open("/sys/class/bluetooth/hci0/address") as f:
-            mac = f.read().strip().replace(":", "")[-4:].upper()
+        with open("/etc/machine-id") as f:
+            suffix = f.read().strip()[-4:].upper()
     except Exception:
-        mac = "0000"
-    return f"OpenAutoLink-{mac}"
+        suffix = "0000"
+    return f"OpenAutoLink-{suffix}"
 
 BT_NAME = _get_bt_name()
 
