@@ -33,6 +33,7 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
 
         val BRIDGE_HOST = stringPreferencesKey("bridge_host")
         val BRIDGE_PORT = intPreferencesKey("bridge_port")
+        val VIDEO_AUTO_NEGOTIATE = booleanPreferencesKey("video_auto_negotiate")
         val VIDEO_CODEC = stringPreferencesKey("video_codec")
         val VIDEO_FPS = intPreferencesKey("video_fps")
         val DISPLAY_MODE = stringPreferencesKey("display_mode")
@@ -96,6 +97,7 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
 
         const val DEFAULT_BRIDGE_HOST = "192.168.222.222"
         const val DEFAULT_BRIDGE_PORT = 5288
+        const val DEFAULT_VIDEO_AUTO_NEGOTIATE = true
         const val DEFAULT_VIDEO_CODEC = "h264"
         const val DEFAULT_VIDEO_FPS = 60
         const val DEFAULT_DISPLAY_MODE = "system_ui_visible"
@@ -104,7 +106,7 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
         const val DEFAULT_REMOTE_DIAGNOSTICS_ENABLED = false
         const val DEFAULT_REMOTE_DIAGNOSTICS_MIN_LEVEL = "INFO"
         const val DEFAULT_SYNC_AA_THEME = true
-        const val DEFAULT_HIDE_AA_CLOCK = true
+        const val DEFAULT_HIDE_AA_CLOCK = false
         const val DEFAULT_HIDE_PHONE_SIGNAL = false
         const val DEFAULT_HIDE_BATTERY_LEVEL = false
         const val DEFAULT_SEND_IMU_SENSORS = true
@@ -138,7 +140,7 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
         const val DEFAULT_SAFE_AREA_TOP = 0
         const val DEFAULT_SAFE_AREA_BOTTOM = 0
         const val DEFAULT_SAFE_AREA_LEFT = 0
-        const val DEFAULT_SAFE_AREA_RIGHT = 184 // 2024 Blazer EV curved right bezel
+        const val DEFAULT_SAFE_AREA_RIGHT = 0
         const val DEFAULT_CONTENT_INSET_TOP = 0
         const val DEFAULT_CONTENT_INSET_BOTTOM = 0
         const val DEFAULT_CONTENT_INSET_LEFT = 0
@@ -154,6 +156,10 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
 
     val bridgePort: Flow<Int> = dataStore.data.map { prefs ->
         prefs[BRIDGE_PORT] ?: DEFAULT_BRIDGE_PORT
+    }
+
+    val videoAutoNegotiate: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[VIDEO_AUTO_NEGOTIATE] ?: DEFAULT_VIDEO_AUTO_NEGOTIATE
     }
 
     val videoCodec: Flow<String> = dataStore.data.map { prefs ->
@@ -364,6 +370,10 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
         dataStore.edit { it[BRIDGE_PORT] = port }
     }
 
+    suspend fun setVideoAutoNegotiate(enabled: Boolean) {
+        dataStore.edit { it[VIDEO_AUTO_NEGOTIATE] = enabled }
+    }
+
     suspend fun setVideoCodec(codec: String) {
         dataStore.edit { it[VIDEO_CODEC] = codec }
     }
@@ -566,9 +576,10 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
         // Always include defaults so bridge uses app defaults even when prefs are unset
         // (e.g. after clearing app data). Without this, the bridge would keep using
         // whatever value was sent in the hello message (device DPI, not user's AA DPI).
-        config["video_codec"] = prefs[VIDEO_CODEC] ?: DEFAULT_VIDEO_CODEC
+        val autoNegotiate = prefs[VIDEO_AUTO_NEGOTIATE] ?: DEFAULT_VIDEO_AUTO_NEGOTIATE
+        config["video_codec"] = if (autoNegotiate) "auto" else (prefs[VIDEO_CODEC] ?: DEFAULT_VIDEO_CODEC)
         config["video_fps"] = (prefs[VIDEO_FPS] ?: DEFAULT_VIDEO_FPS).toString()
-        config["aa_resolution"] = prefs[AA_RESOLUTION] ?: DEFAULT_AA_RESOLUTION
+        config["aa_resolution"] = if (autoNegotiate) "auto" else (prefs[AA_RESOLUTION] ?: DEFAULT_AA_RESOLUTION)
         config["aa_dpi"] = (prefs[AA_DPI] ?: DEFAULT_AA_DPI).toString()
         config["aa_width_margin"] = (prefs[AA_WIDTH_MARGIN] ?: DEFAULT_AA_WIDTH_MARGIN).toString()
         config["aa_height_margin"] = (prefs[AA_HEIGHT_MARGIN] ?: DEFAULT_AA_HEIGHT_MARGIN).toString()
@@ -606,16 +617,33 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
     }
 
     /**
-     * Apply config_echo from the bridge — updates DataStore to match what the bridge
-     * is actually using so Settings UI stays in sync.
+     * Update DataStore from bridge's config_echo so Settings UI shows the
+     * bridge's actual running values. Called on each connection.
      */
     suspend fun applyConfigEcho(config: Map<String, String>) {
-        config["video_codec"]?.let { setVideoCodec(it) }
-        config["video_fps"]?.toIntOrNull()?.let { setVideoFps(it) }
-        config["aa_resolution"]?.let { setAaResolution(it) }
-        config["aa_dpi"]?.toIntOrNull()?.let { setAaDpi(it) }
-        config["aa_width_margin"]?.toIntOrNull()?.let { setAaWidthMargin(it) }
-        config["aa_height_margin"]?.toIntOrNull()?.let { setAaHeightMargin(it) }
-        config["aa_pixel_aspect"]?.toIntOrNull()?.let { setAaPixelAspect(it) }
+        dataStore.edit { prefs ->
+            config["video_codec"]?.let { if (it != "auto") prefs[VIDEO_CODEC] = it }
+            config["video_fps"]?.let { it.toIntOrNull()?.let { v -> prefs[VIDEO_FPS] = v } }
+            config["aa_resolution"]?.let { if (it != "auto") prefs[AA_RESOLUTION] = it }
+            config["video_dpi"]?.let { it.toIntOrNull()?.let { v -> prefs[AA_DPI] = v } }
+            config["aa_width_margin"]?.let { it.toIntOrNull()?.let { v -> prefs[AA_WIDTH_MARGIN] = v } }
+            config["aa_height_margin"]?.let { it.toIntOrNull()?.let { v -> prefs[AA_HEIGHT_MARGIN] = v } }
+            // aa_pixel_aspect: only sync from bridge if app has no value yet (0/unset).
+            // This preserves user manual overrides while allowing fresh installs
+            // to pick up the bridge's persisted value.
+            config["aa_pixel_aspect"]?.let { it.toIntOrNull()?.let { v ->
+                if (v > 0 && (prefs[AA_PIXEL_ASPECT] ?: 0) == 0) {
+                    prefs[AA_PIXEL_ASPECT] = v
+                }
+            } }
+            config["drive_side"]?.let { prefs[DRIVE_SIDE] = it }
+            config["head_unit_name"]?.let { prefs[HEAD_UNIT_NAME] = it }
+            config["hide_clock"]?.let { prefs[HIDE_AA_CLOCK] = it.toBooleanStrictOrNull() ?: false }
+            config["hide_phone_signal"]?.let { prefs[HIDE_PHONE_SIGNAL] = it.toBooleanStrictOrNull() ?: false }
+            config["hide_battery_level"]?.let { prefs[HIDE_BATTERY_LEVEL] = it.toBooleanStrictOrNull() ?: false }
+            // aa_stable_insets and aa_content_insets NOT synced from config_echo.
+            // stable_insets are auto-computed by the bridge from display cutout.
+            // content_insets are user-configured via the editor.
+        }
     }
 }
