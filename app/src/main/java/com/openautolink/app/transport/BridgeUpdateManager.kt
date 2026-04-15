@@ -80,6 +80,7 @@ class BridgeUpdateManager(
     private var cachedRelease: GitHubRelease? = null
     private var lastPushedSha: String? = null  // SHA of the binary we last pushed to the bridge
     private var isManualCheck = false  // true when triggered from Settings UI
+    private var applyTimeoutJob: Job? = null
 
     /**
      * Called when bridge hello is received. Checks if an update is needed
@@ -87,14 +88,19 @@ class BridgeUpdateManager(
      */
     fun onBridgeConnected(bridgeInfo: BridgeInfo) {
         _bridgeVersion.value = bridgeInfo.bridgeVersion
-        // Reset state on reconnect — don't carry stale APPLIED/FAILED from last session
+        // Reset state on reconnect — don't carry stale state from last session.
+        // APPLYING/TRANSFERRING especially: if the bridge restarted and we
+        // reconnected, the old state is meaningless.
         if (_updateState.value == BridgeUpdateState.APPLIED ||
             _updateState.value == BridgeUpdateState.FAILED ||
             _updateState.value == BridgeUpdateState.OFFERING ||
-            _updateState.value == BridgeUpdateState.DEFERRED) {
+            _updateState.value == BridgeUpdateState.DEFERRED ||
+            _updateState.value == BridgeUpdateState.APPLYING ||
+            _updateState.value == BridgeUpdateState.TRANSFERRING) {
             _updateState.value = BridgeUpdateState.IDLE
             _updateMessage.value = ""
         }
+        applyTimeoutJob?.cancel()
         // Clear version check cache so we re-check after reconnect
         lastVersionCheckMs = 0
         updateJob?.cancel()
@@ -144,18 +150,24 @@ class BridgeUpdateManager(
                 DiagnosticLog.i("update", "Bridge update: ${message.status} — ${message.message}")
                 _updateMessage.value = message.message
                 when (message.status) {
-                    "verified", "applying" -> _updateState.value = BridgeUpdateState.APPLYING
+                    "verified", "applying" -> {
+                        _updateState.value = BridgeUpdateState.APPLYING
+                        startApplyTimeout()
+                    }
                     "deferred" -> {
+                        applyTimeoutJob?.cancel()
                         _updateState.value = BridgeUpdateState.DEFERRED
                         _updateMessage.value = "Update ready — will apply when phone disconnects"
                         addHistory("Deferred: waiting for phone disconnect")
                     }
                     "applied" -> {
+                        applyTimeoutJob?.cancel()
                         _updateState.value = BridgeUpdateState.APPLIED
                         _updateMessage.value = "Update applied — bridge restarting..."
                         addHistory("Applied: ${cachedBinaryVersion ?: "unknown"}")
                     }
                     "failed" -> {
+                        applyTimeoutJob?.cancel()
                         _updateState.value = BridgeUpdateState.FAILED
                         addHistory("Failed: ${message.message}")
                     }
@@ -270,7 +282,8 @@ class BridgeUpdateManager(
         lastPushedSha = localSha
 
         // Send offer to bridge
-        val autoApply = preferences.bridgeAutoApply.first()
+        // Manual checks always auto-apply — the user explicitly asked for the update
+        val autoApply = if (isManualCheck) true else preferences.bridgeAutoApply.first()
         _updateState.value = BridgeUpdateState.OFFERING
         _updateMessage.value = "Offering update to bridge..."
         sendMessage(ControlMessage.BridgeUpdateOffer(
@@ -479,7 +492,28 @@ class BridgeUpdateManager(
         updateJob = null
         transferJob?.cancel()
         transferJob = null
+        applyTimeoutJob?.cancel()
+        applyTimeoutJob = null
         _updateState.value = BridgeUpdateState.IDLE
+    }
+
+    /**
+     * Start a timeout for the APPLYING state. If the bridge doesn't restart
+     * (and thus disconnect us) within 45 seconds, the apply likely failed
+     * silently. Transition to FAILED so the UI isn't stuck forever.
+     */
+    private fun startApplyTimeout() {
+        applyTimeoutJob?.cancel()
+        applyTimeoutJob = scope.launch {
+            delay(45_000)
+            if (_updateState.value == BridgeUpdateState.APPLYING) {
+                Log.w(TAG, "Apply timeout — bridge didn't restart within 45s")
+                DiagnosticLog.w("update", "Apply timeout — bridge didn't restart. Apply script may have failed.")
+                _updateState.value = BridgeUpdateState.FAILED
+                _updateMessage.value = "Update apply timed out — bridge may need a reboot"
+                addHistory("Failed: apply timed out (bridge didn't restart)")
+            }
+        }
     }
 
     private fun addHistory(event: String) {
