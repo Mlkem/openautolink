@@ -23,8 +23,9 @@ Full end-to-end testing requires the AAOS app talking to the bridge over a real 
 
 - Android SDK with emulator and platform-tools installed
 - AAOS emulator AVDs (see Emulator Setup below):
-  - **`BlazerEV_AAOS`** — Android 33 Automotive (Google APIs, no Play Store), x86_64, 2400×960. Supports `adb root` and VHAL injection. Primary testing image.
-  - **`DD_AAOS_33`** — Android 33 Automotive Distant Display (Google Play), x86_64, 2400×960 + cluster displays. For visual cluster testing. No `adb root`.
+  - **`BlazerEV_AAOS`** — Android 33 Automotive (Google APIs, no Play Store), x86_64, 2914×1134. Supports `adb root` and VHAL injection. Primary testing image.
+  - **`BlazerEV_AAOS_14`** — Android 14 Automotive (Google APIs, no Play Store), x86_64, 2914×1134. Supports `adb root` and VHAL injection. AAOS 14 compatibility testing.
+  - **`DD_AAOS_33`** — Android 33 Automotive Distant Display (Google Play), x86_64, 2914×1134 + cluster displays. For visual cluster testing. No `adb root`.
 - SBC with bridge built and running (see [bridge/sbc/BUILD.md](../bridge/sbc/BUILD.md))
 - Two ethernet cables
 - One USB ethernet adapter (for the SBC's SSH connection)
@@ -126,14 +127,15 @@ Once complete, proceed to build and deploy the bridge per [bridge/sbc/BUILD.md](
 
 ### Starting the Emulator
 
-We use **two AVDs** for complete testing coverage:
+We use **three AVDs** for complete testing coverage:
 
 | AVD | Image | Root | VHAL Injection | Cluster Visual | Use For |
 |-----|-------|------|---------------|----------------|---------|
 | **`BlazerEV_AAOS`** | `android-33;android-automotive;x86_64` | Yes | Yes | Logs only | Primary: VHAL, video, audio, session, reconnect |
+| **`BlazerEV_AAOS_14`** | `android-34-ext9;android-automotive;x86_64` | Yes | Yes | Logs only | AAOS 14 compatibility testing |
 | **`DD_AAOS_33`** | `android-33;android-automotive-distant-display-playstore;x86_64` | No | No | Yes (visible panel) | Visual cluster verification |
 
-Both AVDs use **2400×960 @ 160dpi** to match the real GM Blazer EV display.
+All AVDs use **2914×1134 @ 200dpi** to match the real GM Blazer EV display.
 
 #### Creating the AVDs (one-time)
 
@@ -141,10 +143,15 @@ Both AVDs use **2400×960 @ 160dpi** to match the real GM Blazer EV display.
 # Install system images
 sdkmanager "system-images;android-33;android-automotive;x86_64"
 sdkmanager "system-images;android-33;android-automotive-distant-display-playstore;x86_64"
+sdkmanager "system-images;android-34-ext9;android-automotive;x86_64"
 
 # Create AVDs
 echo "no" | avdmanager create avd --name "BlazerEV_AAOS" `
   --package "system-images;android-33;android-automotive;x86_64" `
+  --device "automotive_1080p_landscape" --force
+
+echo "no" | avdmanager create avd --name "BlazerEV_AAOS_14" `
+  --package "system-images;android-34-ext9;android-automotive;x86_64" `
   --device "automotive_1080p_landscape" --force
 
 echo "no" | avdmanager create avd --name "DD_AAOS_33" `
@@ -153,7 +160,7 @@ echo "no" | avdmanager create avd --name "DD_AAOS_33" `
 ```
 
 Then edit each AVD's `config.ini` (`~/.android/avd/<name>.avd/config.ini`):
-- Set `hw.lcd.width=2400`, `hw.lcd.height=960`, `hw.lcd.density=160` to match the Blazer EV
+- Set `hw.lcd.width=2914`, `hw.lcd.height=1134`, `hw.lcd.density=200` to match the Blazer EV
 - For `DD_AAOS_33`: shrink the secondary displays to avoid an oversized window:
   ```
   hw.display6.height=240
@@ -167,6 +174,9 @@ Then edit each AVD's `config.ini` (`~/.android/avd/<name>.avd/config.ini`):
 ```powershell
 # Primary testing (VHAL + root):
 emulator -avd BlazerEV_AAOS -no-audio -gpu swiftshader_indirect -no-boot-anim
+
+# AAOS 14 compatibility testing:
+emulator -avd BlazerEV_AAOS_14 -no-audio -gpu swiftshader_indirect -no-boot-anim
 
 # Cluster visual testing (distant display):
 emulator -avd DD_AAOS_33 -no-audio -gpu swiftshader_indirect -no-boot-anim
