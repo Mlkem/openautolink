@@ -240,8 +240,10 @@ def handle_aa_rfcomm(fd):
         print("WiFi credential exchange complete!", flush=True)
     except Exception as e:
         print(f"RFCOMM exchange error: {e}", flush=True)
-    finally:
-        os.close(fd)
+        try:
+            os.close(fd)
+        except OSError:
+            pass
 
 
 class Agent(dbus.service.Object):

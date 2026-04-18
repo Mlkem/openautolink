@@ -582,18 +582,17 @@ class SessionManager(
 
     /**
      * Auto-calculate and send pixel_aspect to the bridge for crop mode.
-     * In crop mode, the 16:9 video fills the wider display surface, stretching
-     * pixels horizontally. pixel_aspect tells the phone to pre-distort so
-     * circles remain circular after the stretch.
+     * The display aspect ratio differs from the 16:9 video on most car screens.
+     * pixel_aspect tells the phone to pre-distort the rendering so circles
+     * remain circular regardless of how the app scales the video surface.
      */
     private suspend fun autoSendPixelAspect() {
         val ctx = context ?: return
         val prefs = AppPreferences.getInstance(ctx)
-        val scalingMode = prefs.videoScalingMode.first()
         val userPixelAspect = prefs.aaPixelAspect.first()
 
-        // Only auto-calculate if in crop mode and user hasn't set a manual value
-        if (scalingMode != "crop" || userPixelAspect != 0) return
+        // Skip if user has set a manual value
+        if (userPixelAspect != 0) return
 
         val dm = ctx.getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
         val display = dm?.getDisplay(android.view.Display.DEFAULT_DISPLAY) ?: return
@@ -619,11 +618,11 @@ class SessionManager(
         val pa = (displayAr / videoAr * 10000).toInt()
         if (pa == 10000) return // square pixels, no correction needed
 
-        Log.i(TAG, "Auto pixel_aspect for crop mode: $pa (display=${displayW.toInt()}x${displayH.toInt()}, video=${videoW}x${videoH})")
+        Log.i(TAG, "Auto pixel_aspect: $pa (display=${displayW.toInt()}x${displayH.toInt()}, video=${videoW}x${videoH})")
 
         // Send as config_update to bridge — bridge applies it to the SDR
         connectionManager.sendControlMessage(
-            ControlMessage.ConfigUpdate(mapOf("pixel_aspect" to pa.toString()))
+            ControlMessage.ConfigUpdate(mapOf("aa_pixel_aspect" to pa.toString()))
         )
     }
 
