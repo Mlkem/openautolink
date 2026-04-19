@@ -355,6 +355,25 @@ private fun CarTab(car: CarInfo) {
             car.evCurrentBatteryCapacityWh?.let {
                 DiagRow("Usable Capacity", "${"%.0f".format(it)} Wh")
             }
+            // Show which capacity value the bridge uses for Maps VEM SOC calculation
+            if (car.evBatteryCapacityWh != null) {
+                val usable = car.evCurrentBatteryCapacityWh
+                val gross = car.evBatteryCapacityWh
+                val vemCap: Float
+                val source: String
+                if (usable != null && usable > 0f) {
+                    vemCap = usable
+                    source = "usable (live)"
+                } else {
+                    vemCap = gross!! * 0.88f
+                    source = "est. 88% of gross"
+                }
+                val socPct = car.evBatteryLevelWh?.let { level ->
+                    if (vemCap > 0f) "%.0f".format(level / vemCap * 100f) + "%" else "—"
+                } ?: "—"
+                DiagRow("VEM Capacity", "${"%.0f".format(vemCap)} Wh ($source) → $socPct",
+                    valueColor = if (usable != null) Color(0xFF4CAF50) else Color(0xFFFFC107))
+            }
             car.evBatteryTempC?.let {
                 DiagRow("Battery Temp", "${"%.1f".format(it)} °C")
             }
