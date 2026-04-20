@@ -152,8 +152,8 @@ All settings are in `/etc/openautolink.env`. Key options:
 
 ```bash
 # App display (how the app renders on the car's screen)
-OAL_VIDEO_WIDTH=2400           # Match car display
-OAL_VIDEO_HEIGHT=960
+OAL_VIDEO_WIDTH=2914           # Match car display
+OAL_VIDEO_HEIGHT=1134
 OAL_VIDEO_DPI=160
 
 # AA stream (what the phone sends — separate from app display!)

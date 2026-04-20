@@ -114,8 +114,8 @@ Key settings to check:
 |---------|---------|-------------|
 | `OAL_CAR_NET_MODE` | `external-nic` | How the SBC connects to the car. `external-nic` = onboard Ethernet to car via USB adapter (recommended) |
 | `OAL_CAR_NET_IP` | `192.168.222.222` | IP address the car app connects to |
-| `OAL_VIDEO_WIDTH` | `2400` | Video resolution width |
-| `OAL_VIDEO_HEIGHT` | `960` | Video resolution height |
+| `OAL_VIDEO_WIDTH` | `2914` | Video resolution width |
+| `OAL_VIDEO_HEIGHT` | `1134` | Video resolution height |
 | `OAL_AA_FPS` | `60` | Target FPS |
 | `OAL_AA_CODEC` | `h264` | Video codec (`h264`, `h265`, `vp9`) |
 | `OAL_WIRELESS_COUNTRY` | `US` | Your regulatory country code (affects WiFi channels) |

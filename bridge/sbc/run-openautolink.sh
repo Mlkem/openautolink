@@ -10,8 +10,8 @@ done
 ARGS=(
     --tcp-car-port="${OAL_CAR_TCP_PORT:-5288}"
     --tcp-port="${OAL_PHONE_TCP_PORT:-5277}"
-    --video-width="${OAL_VIDEO_WIDTH:-2400}"
-    --video-height="${OAL_VIDEO_HEIGHT:-960}"
+    --video-width="${OAL_VIDEO_WIDTH:-2914}"
+    --video-height="${OAL_VIDEO_HEIGHT:-1134}"
     --video-fps="${OAL_AA_FPS:-60}"
     --video-dpi="${OAL_AA_DPI:-160}"
     --video-codec="${OAL_AA_CODEC:-h264}"

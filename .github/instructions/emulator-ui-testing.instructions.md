@@ -18,10 +18,10 @@ adb shell pm list packages | Select-String openautolink
 
 ## Display Dimensions
 
-- **BlazerEV AAOS emulator**: 2400x960 physical, 160dpi
-- **Status bar**: 76px (top)
-- **Nav bar**: 96px (bottom, AAOS dock)
-- **Usable area (all bars visible)**: 2400x788
+- **BlazerEV AAOS**: 2914x1134, 200dpi (real car and emulator AVD should match)
+- **Status bar**: 95px (top)
+- **Nav bar**: 120px (bottom, AAOS dock)
+- **Usable area (all bars visible)**: 2914x919
 
 ## Finding UI Elements Dynamically
 
@@ -107,13 +107,15 @@ Content starts at x=104. Radio buttons at x ~120-130, labels at x ~164+. The cli
 
 ### Expected surface dimensions per mode
 
+### Expected surface dimensions per mode
+
 | Mode | Surface Size | Calculation |
 |------|-------------|-------------|
-| `system_ui_visible` | 2400x788 | 960 - 76 (status) - 96 (nav) |
-| `status_bar_hidden` | 2400x864 | 960 - 96 (nav only) |
-| `nav_bar_hidden` | 2400x884 | 960 - 76 (status only) |
-| `fullscreen_immersive` | 2400x960 | Full screen, no bars |
-| `custom_viewport` | 2400x960 | Full screen + custom Modifier.size |
+| `system_ui_visible` | 2914x919 | 1134 - 95 (status) - 120 (nav) |
+| `status_bar_hidden` | 2914x1014 | 1134 - 120 (nav only) |
+| `nav_bar_hidden` | 2914x1039 | 1134 - 95 (status only) |
+| `fullscreen_immersive` | 2914x1134 | Full screen, no bars |
+| `custom_viewport` | 2914x1134 | Full screen + custom Modifier.size |
 
 ### Testing a display mode
 
