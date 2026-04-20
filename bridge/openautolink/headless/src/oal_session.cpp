@@ -648,11 +648,23 @@ void OalSession::handle_app_hello(const std::string& json) {
             case 5: video_w = 3840; video_h = 2160; break;
         }
 
-        // pixel_aspect_ratio: NOT auto-computed — leave at 0 (square pixels)
-        // by default. User can override via Settings > Video > Pixel Aspect.
-        // Auto-computing caused phone AA process crashes (Communication Error 6)
-        // with values like 14454 from display/video AR mismatch.
-        if (config_.aa_ui_experiment.pixel_aspect_ratio_e4 > 0) {
+        // pixel_aspect_ratio: auto-computed from display aspect ratio vs video
+        // aspect ratio. Tells the phone to pre-distort rendering so circles
+        // remain circular when the app scales the video to fill the display.
+        // Only auto-computed when no manual override from env/CLI/config_update.
+        if (!config_.pixel_aspect_explicit) {
+            double display_ar = static_cast<double>(display_w) / display_h;
+            double video_ar = static_cast<double>(video_w) / video_h;
+            if (display_ar > 0 && video_ar > 0 && display_ar != video_ar) {
+                uint32_t pa = static_cast<uint32_t>(display_ar / video_ar * 10000);
+                if (pa != 10000) {
+                    config_.aa_ui_experiment.pixel_aspect_ratio_e4 = pa;
+                    BLOG << "[OAL] auto pixel_aspect=" << pa
+                              << " (display=" << display_w << "x" << display_h
+                              << " video=" << video_w << "x" << video_h << ")" << std::endl;
+                }
+            }
+        } else if (config_.aa_ui_experiment.pixel_aspect_ratio_e4 > 0) {
             BLOG << "[OAL] pixel_aspect_ratio=" << config_.aa_ui_experiment.pixel_aspect_ratio_e4
                       << " (manual override)" << std::endl;
         }
