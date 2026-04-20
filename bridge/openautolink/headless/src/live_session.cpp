@@ -2372,32 +2372,12 @@ void HeadlessVideoHandler::sendUiThemeUpdate(bool night_mode) {
     if (mode == last_night_mode_sent_) return;  // already sent this mode
     last_night_mode_sent_ = mode;
 
-    // Build UpdateUiConfigRequest and send via video channel's messenger
-    auto message = std::make_shared<aasdk::messenger::Message>(
-        aasdk::messenger::ChannelId::MEDIA_SINK_VIDEO,
-        aasdk::messenger::EncryptionType::ENCRYPTED,
-        aasdk::messenger::MessageType::SPECIFIC);
-    message->insertPayload(
-        aasdk::messenger::MessageId(
-            aap_protobuf::service::media::sink::MediaMessageId::MEDIA_MESSAGE_UPDATE_UI_CONFIG_REQUEST).getData());
-
-    aap_protobuf::service::control::message::UpdateUiConfigRequest request;
-    auto* ui_config = request.mutable_ui_config();
-    ui_config->set_ui_theme(night_mode
-        ? aap_protobuf::service::media::shared::message::UI_THEME_DARK
-        : aap_protobuf::service::media::shared::message::UI_THEME_LIGHT);
-    message->insertPayload(request);
-
-    auto promise = aasdk::channel::SendPromise::defer(strand_);
-    promise->then(
-        [night_mode]() {
-            std::cerr << "[aasdk] UI theme update sent: "
-                      << (night_mode ? "dark" : "light") << std::endl;
-        },
-        [](auto e) {
-            std::cerr << "[aasdk] UI theme update send failed: " << e.what() << std::endl;
-        });
-    channel_->send(std::move(message), std::move(promise));
+    // The phone rejects UpdateUiConfigRequest that includes ui_theme
+    // ("UpdateUiConfigRequest must not specify an updated UiTheme", Error 6).
+    // Theme is set in the initial ServiceDiscoveryResponse only.
+    // Just log the change for now.
+    std::cerr << "[aasdk] UI theme change: " << (night_mode ? "dark" : "light")
+              << " (not sent — phone rejects runtime theme updates)" << std::endl;
 }
 
 void HeadlessVideoHandler::sendUiConfigUpdate(
@@ -2421,11 +2401,8 @@ void HeadlessVideoHandler::sendUiConfigUpdate(
     aap_protobuf::service::control::message::UpdateUiConfigRequest request;
     auto* ui_config = request.mutable_ui_config();
     apply_ui_config(ui_config, margins, content_insets, stable_insets);
-    if (last_night_mode_sent_ == 1) {
-        ui_config->set_ui_theme(aap_protobuf::service::media::shared::message::UI_THEME_DARK);
-    } else if (last_night_mode_sent_ == 0) {
-        ui_config->set_ui_theme(aap_protobuf::service::media::shared::message::UI_THEME_LIGHT);
-    }
+    // Do NOT set ui_theme here — the phone rejects UpdateUiConfigRequest
+    // with ui_theme set ("must not specify an updated UiTheme", Error 6).
     message->insertPayload(request);
 
     auto promise = aasdk::channel::SendPromise::defer(strand_);

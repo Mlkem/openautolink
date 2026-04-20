@@ -222,6 +222,7 @@ object ControlMessageSerializer {
                 }
                 put("protocol_version", ControlMessage.PROTOCOL_VERSION)
                 put("min_protocol_version", ControlMessage.MIN_PROTOCOL_VERSION)
+                put("video_scaling_mode", message.videoScalingMode)
             }
 
             is ControlMessage.Touch -> buildJsonObject {

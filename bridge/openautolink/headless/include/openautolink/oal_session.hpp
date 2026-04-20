@@ -168,6 +168,7 @@ private:
     std::string phone_name_;
     uint64_t mic_frame_count_ = 0;
     std::chrono::steady_clock::time_point phone_connected_time_{};  // when phone_connected_ was set
+    std::chrono::steady_clock::time_point last_idr_request_time_{};  // throttle for VFI from keyframe requests
 
     // Thread-safe pending video write queue (aasdk thread → video TCP thread)
     std::mutex video_mutex_;

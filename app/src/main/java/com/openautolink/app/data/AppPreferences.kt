@@ -541,7 +541,12 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
         config["aa_dpi"] = (prefs[AA_DPI] ?: DEFAULT_AA_DPI).toString()
         config["aa_width_margin"] = (prefs[AA_WIDTH_MARGIN] ?: DEFAULT_AA_WIDTH_MARGIN).toString()
         config["aa_height_margin"] = (prefs[AA_HEIGHT_MARGIN] ?: DEFAULT_AA_HEIGHT_MARGIN).toString()
-        config["aa_pixel_aspect"] = (prefs[AA_PIXEL_ASPECT] ?: DEFAULT_AA_PIXEL_ASPECT).toString()
+        // Only include pixel_aspect in config_update when user has explicitly set it (> 0).
+        // When 0/unset, omit it so the bridge's auto-computed value is used.
+        val pixelAspect = prefs[AA_PIXEL_ASPECT] ?: DEFAULT_AA_PIXEL_ASPECT
+        if (pixelAspect > 0) {
+            config["aa_pixel_aspect"] = pixelAspect.toString()
+        }
         config["drive_side"] = prefs[DRIVE_SIDE] ?: DEFAULT_DRIVE_SIDE
         config["head_unit_name"] = prefs[HEAD_UNIT_NAME] ?: DEFAULT_HEAD_UNIT_NAME
         val btMac = prefs[BT_MAC] ?: DEFAULT_BT_MAC
@@ -584,13 +589,11 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
             config["video_dpi"]?.let { it.toIntOrNull()?.let { v -> prefs[AA_DPI] = v } }
             config["aa_width_margin"]?.let { it.toIntOrNull()?.let { v -> prefs[AA_WIDTH_MARGIN] = v } }
             config["aa_height_margin"]?.let { it.toIntOrNull()?.let { v -> prefs[AA_HEIGHT_MARGIN] = v } }
-            // aa_pixel_aspect: only sync from bridge if app has no value yet (0/unset).
-            // This preserves user manual overrides while allowing fresh installs
-            // to pick up the bridge's persisted value.
+            // aa_pixel_aspect: always sync from bridge config_echo.
+            // The bridge is the authority for this value — it decides whether
+            // to auto-compute, use an env override, or disable (0).
             config["aa_pixel_aspect"]?.let { it.toIntOrNull()?.let { v ->
-                if (v > 0 && (prefs[AA_PIXEL_ASPECT] ?: 0) == 0) {
-                    prefs[AA_PIXEL_ASPECT] = v
-                }
+                prefs[AA_PIXEL_ASPECT] = v
             } }
             config["drive_side"]?.let { prefs[DRIVE_SIDE] = it }
             config["head_unit_name"]?.let { prefs[HEAD_UNIT_NAME] = it }

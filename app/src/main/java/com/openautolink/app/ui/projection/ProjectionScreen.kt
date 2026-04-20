@@ -351,6 +351,8 @@ fun ProjectionScreen(
                 bridgeUptimeSeconds = uiState.bridgeUptimeSeconds,
                 phoneName = uiState.phoneName,
                 phoneBatteryLevel = uiState.phoneBatteryLevel,
+                aaPixelAspect = uiState.aaPixelAspect,
+                aaDpi = uiState.aaDpi,
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .padding(12.dp)
@@ -385,6 +387,8 @@ private fun VideoStatsOverlay(
     bridgeUptimeSeconds: Long,
     phoneName: String?,
     phoneBatteryLevel: Int?,
+    aaPixelAspect: Int,
+    aaDpi: Int,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -430,6 +434,10 @@ private fun VideoStatsOverlay(
                 StatLine("Decoder", "${stats.decoderName}${if (stats.isHardware) " HW" else " SW"}")
                 if (stats.width > 0) {
                     StatLine("Resolution", "${stats.width}x${stats.height}")
+                }
+                StatLine("DPI", aaDpi.toString())
+                if (aaPixelAspect > 0) {
+                    StatLine("Pixel Aspect", "${"%.4f".format(aaPixelAspect / 10000f)} (${aaPixelAspect}e⁻⁴)")
                 }
                 StatLine("FPS", "${"%.1f".format(stats.fps)} fps",
                     valueColor = when {

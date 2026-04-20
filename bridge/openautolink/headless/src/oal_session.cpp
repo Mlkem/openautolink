@@ -125,23 +125,14 @@ void OalSession::on_app_disconnected() {
 void OalSession::on_video_client_connected() {
     if (!phone_connected_) return;
 
-    // Always replay cached SPS/PPS so the car app's decoder can initialise.
 #ifdef PI_AA_ENABLE_AASDK_LIVE
     if (aa_session_) {
+        // Replay cached SPS/PPS so the car app's decoder can initialise.
         aa_session_->replay_cached_keyframe();
-
-        // Only request fresh IDR if the phone has been connected for > 5s.
-        // During initial connection, the entity's onChannelSetupResponse already
-        // sent a VideoFocusIndication — sending another causes the phone to
-        // receive 3 VFIs at once and drop with Error 6.
-        auto since_connected = std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::steady_clock::now() - phone_connected_time_).count();
-        if (since_connected > 5) {
-            aa_session_->request_fresh_idr();
-        } else {
-            BLOG << "[OAL] on_video_client_connected: skipping IDR request (initial connection, "
-                      << since_connected << "s since phone_connected)" << std::endl;
-        }
+        // Request a fresh IDR from the phone so the car app gets a clean
+        // keyframe that matches the current P-frame stream.
+        // This fires once per video TCP connect (not in a loop).
+        aa_session_->request_fresh_idr();
     }
 #endif
 }
@@ -530,7 +521,8 @@ void OalSession::send_config_echo() {
         << R"(,"video_fps":)" << config_.video_fps
         << R"(,"video_dpi":)" << config_.video_dpi
         << R"(,"aa_resolution":")" << res_name
-        << R"(","drive_side":")" << (config_.left_hand_drive ? "left" : "right")
+        << R"(","aa_pixel_aspect":)" << config_.aa_ui_experiment.pixel_aspect_ratio_e4
+        << R"(,"drive_side":")" << (config_.left_hand_drive ? "left" : "right")
         << R"(","head_unit_name":")" << oal_json_escape(config_.head_unit_name)
         << R"("})";
     send_control_line(oss.str());
@@ -663,12 +655,17 @@ void OalSession::handle_app_hello(const std::string& json) {
     oal_json_extract_int(json, "bar_left", bar_left);
     oal_json_extract_int(json, "bar_right", bar_right);
 
+    // Read video scaling mode — determines whether pixel_aspect auto-compute applies
+    std::string scaling_mode = oal_json_extract_string(json, "video_scaling_mode");
+
     BLOG << "[OAL] app hello: display=" << display_w << "x" << display_h
               << " dpi=" << display_dpi
               << " cutout=T:" << cut_top << " B:" << cut_bottom
               << " L:" << cut_left << " R:" << cut_right
               << " bars=T:" << bar_top << " B:" << bar_bottom
-              << " L:" << bar_left << " R:" << bar_right << std::endl;
+              << " L:" << bar_left << " R:" << bar_right
+              << " scaling=" << (scaling_mode.empty() ? "crop" : scaling_mode)
+              << std::endl;
 
     // Auto-compute AA stable_insets from display cutout.
     // The app uses SCALE_TO_FIT (letterbox) — the full 16:9 video frame is visible
@@ -685,21 +682,17 @@ void OalSession::handle_app_hello(const std::string& json) {
             case 5: video_w = 3840; video_h = 2160; break;
         }
 
-        // pixel_aspect_ratio: auto-computed from display aspect ratio vs video
-        // aspect ratio. Tells the phone to pre-distort rendering so circles
-        // remain circular when the app scales the video to fill the display.
-        // Only auto-computed when no manual override from env/CLI/config_update.
+        // pixel_aspect_ratio: compensates for non-uniform scaling when the
+        // decoder stretches the video to fill a non-16:9 surface.
+        // Default: 0 (square pixels, no compensation). Most decoders use
+        // SCALE_TO_FIT which preserves the video's aspect ratio — no
+        // distortion occurs. Only Qualcomm c2.qti decoders ignore
+        // SCALE_TO_FIT and fill the surface, requiring non-square pixel_aspect.
+        // Users can set OAL_AA_PIXEL_ASPECT_E4 in env for their hardware.
         if (!config_.pixel_aspect_explicit) {
-            double display_ar = static_cast<double>(display_w) / display_h;
-            double video_ar = static_cast<double>(video_w) / video_h;
-            if (display_ar > 0 && video_ar > 0 && display_ar != video_ar) {
-                uint32_t pa = static_cast<uint32_t>(display_ar / video_ar * 10000);
-                if (pa != 10000) {
-                    config_.aa_ui_experiment.pixel_aspect_ratio_e4 = pa;
-                    BLOG << "[OAL] auto pixel_aspect=" << pa
-                              << " (display=" << display_w << "x" << display_h
-                              << " video=" << video_w << "x" << video_h << ")" << std::endl;
-                }
+            // No auto-compute — leave at 0 (square pixels)
+            if (config_.aa_ui_experiment.pixel_aspect_ratio_e4 != 0) {
+                config_.aa_ui_experiment.pixel_aspect_ratio_e4 = 0;
             }
         } else if (config_.aa_ui_experiment.pixel_aspect_ratio_e4 > 0) {
             BLOG << "[OAL] pixel_aspect_ratio=" << config_.aa_ui_experiment.pixel_aspect_ratio_e4
@@ -944,7 +937,7 @@ void OalSession::handle_config_update(const std::string& json) {
     if (oal_json_extract_int(json, "aa_pixel_aspect", pa) && pa >= 0 &&
         pa != static_cast<int>(config_.aa_ui_experiment.pixel_aspect_ratio_e4)) {
         config_.aa_ui_experiment.pixel_aspect_ratio_e4 = pa;
-        config_.pixel_aspect_explicit = (pa > 0);  // manual override disables auto-compute
+        config_.pixel_aspect_explicit = (pa > 0);
         config_changed = true;
         BLOG << "[OAL] pixel_aspect_ratio override: " << pa << std::endl;
     }
@@ -1228,21 +1221,14 @@ void OalSession::handle_keyframe_request() {
     BLOG << "[OAL] keyframe request from app" << std::endl;
 #ifdef PI_AA_ENABLE_AASDK_LIVE
     if (aa_session_) {
-        // Replay SPS/PPS (codec config only) so the app can reconfigure its
-        // decoder after a surface change. Do NOT replay the stale cached IDR
-        // — it causes green/blocky artifacts (see replayCachedKeyframe comment).
+        // Replay cached SPS/PPS so the app can reconfigure its decoder.
         aa_session_->replay_cached_keyframe();
-        // Only request fresh IDR if the phone has been connected for > 5s.
-        // During initial connection, the entity's onChannelSetupResponse already
-        // sent a VideoFocusIndication — sending another causes the phone to
-        // receive multiple VFIs at once and drop with Error 6.
-        auto since_connected = std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::steady_clock::now() - phone_connected_time_).count();
-        if (since_connected > 5) {
+        // Also request a fresh IDR from the phone, but throttled to once per 5s
+        // to avoid flooding the phone with VideoFocusIndications.
+        auto now = std::chrono::steady_clock::now();
+        if (now - last_idr_request_time_ > std::chrono::seconds(5)) {
+            last_idr_request_time_ = now;
             aa_session_->request_fresh_idr();
-        } else {
-            BLOG << "[OAL] keyframe: skipping IDR request (initial connection, "
-                      << since_connected << "s since phone_connected)" << std::endl;
         }
     }
 #endif
