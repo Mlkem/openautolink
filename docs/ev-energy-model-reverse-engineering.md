@@ -31,9 +31,9 @@ battery percentage remaining at each destination in search results and during na
 | `INFO_MODEL_YEAR` | 2024 | read OK |
 | `INFO_FUEL_TYPE` | [10] (ELECTRIC) | read OK |
 | `INFO_EV_CONNECTOR_TYPE` | [1, 5] (J1772 + CCS1) | read OK |
-| `INFO_EV_BATTERY_CAPACITY` | 83,010 Wh | subscribed |
-| `EV_BATTERY_LEVEL` | ~62,000 Wh (varies) | subscribed |
-| `RANGE_REMAINING` | ~215,000 m (varies) | subscribed |
+| `INFO_EV_BATTERY_CAPACITY` | 85,660 Wh | subscribed |
+| `EV_BATTERY_LEVEL` | ~53,900 Wh (varies) | subscribed |
+| `RANGE_REMAINING` | ~283,000 m (varies) | subscribed |
 | `EV_CHARGE_PORT_OPEN` | Yes/No | subscribed |
 | `EV_CHARGE_PORT_CONNECTED` | Yes/No | subscribed |
 | `EV_BATTERY_INSTANTANEOUS_CHARGE_RATE` | 0.0 W (parked) | subscribed |
@@ -67,13 +67,14 @@ We were setting `min_usable_capacity = capacityWh * 0.95` (a constant), so Maps 
 computed ~95% regardless of actual charge. Fixed by setting `min_usable_capacity = currentWh`
 (the live `EV_BATTERY_LEVEL` value).
 
-**Gross vs Usable Capacity (fixed):** Maps was showing 64% SOC when the car's
-dashboard showed 73%. Root cause: we were using `INFO_EV_BATTERY_CAPACITY` (gross
-battery capacity = 83,010 Wh) as `max_capacity`. The car's dashboard shows SOC relative
-to the **usable** capacity (`EV_CURRENT_BATTERY_CAPACITY` ≈ 72,800 Wh), which excludes
-GM's ~12% top/bottom buffer. Maps computed SOC = 53,126 / 83,010 = 64% instead of the
-correct 53,126 / 72,800 = 73%. Fixed by preferring `EV_CURRENT_BATTERY_CAPACITY` when
-available, falling back to `INFO_EV_BATTERY_CAPACITY` if not.
+**Gross vs Usable Capacity (investigated, reverted):** Initially suspected that the
+car's dashboard used a separate "usable" capacity from `EV_CURRENT_BATTERY_CAPACITY`,
+and that using the gross `INFO_EV_BATTERY_CAPACITY` produced wrong percentages. Applied
+an 88% correction factor as fallback. Real-car testing (April 2026) proved this wrong:
+the Blazer EV dashboard computes SOC directly from `EV_BATTERY_LEVEL / INFO_EV_BATTERY_CAPACITY`
+(e.g., 53,900 / 85,660 = 62%, matching the dashboard). `EV_CURRENT_BATTERY_CAPACITY` is not
+exposed by GM's HAL. Using the raw gross capacity produces matching percentages in Maps.
+If `EV_CURRENT_BATTERY_CAPACITY` becomes available on other vehicles, we still prefer it.
 
 Additionally, arrive/return estimates showed the same percentage (no route energy
 deduction). Added missing VEM fields discovered in the AAOS Maps decompile
@@ -421,7 +422,7 @@ High byte of type_info char: `0x10` = has-bit presence word 1, `0x14/0x15` etc =
 The `sendVehicleEnergyModel(capacityWh, currentWh, rangeM)` method builds the protobuf:
 
 ```
-battery.max_capacity.watt_hours = capacityWh          // EV_CURRENT_BATTERY_CAPACITY (usable) preferred, fallback INFO_EV_BATTERY_CAPACITY (gross)
+battery.max_capacity.watt_hours = capacityWh          // EV_CURRENT_BATTERY_CAPACITY preferred, fallback INFO_EV_BATTERY_CAPACITY
 battery.min_usable_capacity.watt_hours = currentWh     // from EV_BATTERY_LEVEL — Maps reads this as current SOC!
 battery.reserve_energy.watt_hours = capacityWh * 0.05
 battery.regen_braking_capable = true
@@ -433,11 +434,10 @@ consumption.aerodynamic.rate = 0.36                      // drag coefficient con
 charging_prefs.mode = 1                                  // standard
 ```
 
-> **Critical insight — usable vs gross capacity:** GM reserves ~12% of the total battery
-> (top/bottom buffer). `INFO_EV_BATTERY_CAPACITY` reports the full 83 kWh, but
-> `EV_CURRENT_BATTERY_CAPACITY` reports only the ~73 kWh usable portion. The dashboard
-> shows SOC relative to usable capacity, so the VEM must use `EV_CURRENT_BATTERY_CAPACITY`
-> as `max_capacity` to produce matching percentages.
+> **Confirmed (April 2026):** On the Blazer EV, the dashboard computes SOC as
+> `EV_BATTERY_LEVEL / INFO_EV_BATTERY_CAPACITY` (e.g., 53,900 / 85,660 = 62%).
+> `EV_CURRENT_BATTERY_CAPACITY` is not exposed by GM's HAL. Using the raw gross
+> capacity produces matching percentages. No 88% correction factor is needed.
 
 > **Critical insight:** Despite the proto field name `min_usable_capacity`, Maps uses this
 > as the **current battery level in Wh**. This was discovered by tracing `rah.m33791O()` in

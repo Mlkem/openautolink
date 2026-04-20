@@ -365,14 +365,14 @@ private fun CarTab(car: CarInfo) {
                     vemCap = usable
                     source = "usable (live)"
                 } else {
-                    vemCap = gross!! * 0.88f
-                    source = "est. 88% of gross"
+                    vemCap = gross!!
+                    source = "gross"
                 }
                 val socPct = car.evBatteryLevelWh?.let { level ->
                     if (vemCap > 0f) "%.0f".format(level / vemCap * 100f) + "%" else "—"
                 } ?: "—"
                 DiagRow("VEM Capacity", "${"%.0f".format(vemCap)} Wh ($source) → $socPct",
-                    valueColor = if (usable != null) Color(0xFF4CAF50) else Color(0xFFFFC107))
+                    valueColor = if (usable != null) Color(0xFF4CAF50) else Color.White)
             }
             car.evBatteryTempC?.let {
                 DiagRow("Battery Temp", "${"%.1f".format(it)} °C")

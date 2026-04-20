@@ -1558,15 +1558,13 @@ void LiveAasdkSession::parse_and_forward_vehicle_data(const std::string& json) {
     // Cache EV values — they persist across phone reconnects so VEM can be
     // sent immediately when the phone requests sensor 23 on next session
     // Prefer EV_CURRENT_BATTERY_CAPACITY (usable capacity) over INFO_EV_BATTERY_CAPACITY
-    // (gross capacity). The car dashboard shows SOC relative to usable capacity, and
-    // Maps must use the same denominator to display matching percentages.
-    // Fallback: if only gross capacity is available, estimate usable as 88% of gross.
-    // This matches the Blazer EV's 73/83 ratio and is reasonable for most modern EVs
-    // (OEMs reserve 10-15% as top/bottom buffer for battery longevity).
+    // (gross capacity). On the 2024 Blazer EV, the dashboard computes SOC directly
+    // from gross capacity (EV_BATTERY_LEVEL / INFO_EV_BATTERY_CAPACITY), so using the
+    // raw gross value produces matching percentages in Maps.
     if (ev_current_cap_wh && *ev_current_cap_wh > 0)
         cached_ev_cap_wh_ = static_cast<int>(*ev_current_cap_wh);
     else if (ev_cap_wh && *ev_cap_wh > 0)
-        cached_ev_cap_wh_ = static_cast<int>(*ev_cap_wh * 0.88f);
+        cached_ev_cap_wh_ = static_cast<int>(*ev_cap_wh);
     if (ev_level_wh && *ev_level_wh > 0)
         cached_ev_level_wh_ = static_cast<int>(*ev_level_wh);
     if (range_m_val && *range_m_val > 0)
