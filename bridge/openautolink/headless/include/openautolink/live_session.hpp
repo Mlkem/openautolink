@@ -107,6 +107,9 @@ public:
     using DisconnectCallback = std::function<void()>;
     void set_disconnect_callback(DisconnectCallback cb) { disconnect_cb_ = std::move(cb); }
 
+    using HandshakeCompleteCallback = std::function<void()>;
+    void set_handshake_complete_callback(HandshakeCompleteCallback cb) { handshake_complete_cb_ = std::move(cb); }
+
 private:
     // IControlServiceChannelEventHandler
     void onVersionResponse(uint16_t major, uint16_t minor,
@@ -140,6 +143,7 @@ private:
     HeadlessConfig config_;
     bool active_ = false;
     DisconnectCallback disconnect_cb_;
+    HandshakeCompleteCallback handshake_complete_cb_;
 
     // Ping timer
     boost::asio::deadline_timer ping_timer_;
@@ -281,6 +285,10 @@ private:
     // window between TCP accept and phone_connected=true. Empty when no
     // wireless session is active. Cleared in every entity_ teardown path.
     std::string wireless_peer_ip_;
+
+    // Timestamp of the last entity creation — used to reject duplicate TCP
+    // connections from the same phone during the SSL handshake cycling window.
+    std::chrono::steady_clock::time_point last_entity_created_{};
 
     // USB host mode — kept alive for continuous device scanning
     std::shared_ptr<aasdk::usb::USBWrapper> usb_wrapper_;

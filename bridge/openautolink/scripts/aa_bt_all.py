@@ -122,6 +122,15 @@ preferred_probe = {"done": False, "reachable": False, "lock": threading.Lock()}
 _last_reject_log_at = {}
 REJECT_LOG_INTERVAL_SEC = 10.0
 
+# Per-MAC RFCOMM cooldown — after a successful WiFi credential exchange,
+# reject further RFCOMM from the same MAC for this many seconds. This stops
+# the phone's AA stack from firing repeated RFCOMM exchanges (each one triggers
+# a new TCP:5277 connection that kills the previous SSL handshake in progress).
+# 60s is enough for the phone to establish and maintain a stable AA session.
+# The phone will retry RFCOMM after the cooldown if it genuinely lost the session.
+_last_rfcomm_exchange_at = {}
+RFCOMM_COOLDOWN_SEC = 60.0
+
 def _log_rejection(mac, reason):
     now = time.monotonic()
     last = _last_reject_log_at.get(mac, 0.0)
@@ -392,7 +401,7 @@ def rfcomm_recv(fd):
         d += os.read(fd, sz - len(d))
     return mt, d
 
-def handle_aa_rfcomm(fd, connecting_mac=""):
+def handle_aa_rfcomm(fd, connecting_mac="", is_cooldown=False):
     """Handle the AA wireless WiFi credential exchange over RFCOMM."""
     fl = fcntl.fcntl(fd, fcntl.F_GETFL)
     fcntl.fcntl(fd, fcntl.F_SETFL, fl & ~os.O_NONBLOCK)
@@ -414,6 +423,12 @@ def handle_aa_rfcomm(fd, connecting_mac=""):
         oal_print(f"Got msg type={mt3} len={len(d3)}", flush=True)
 
         oal_print("WiFi credential exchange complete!", flush=True)
+
+        # Record successful exchange time for cooldown gate — but only for
+        # the initial exchange, not cooldown repeats (which are completed
+        # silently to avoid SHUT_RDWR rejection killing the session).
+        if connecting_mac and not is_cooldown:
+            _last_rfcomm_exchange_at[connecting_mac] = time.monotonic()
 
         # If this was the switch-override target, clear the override now that
         # credentials are delivered. Eliminates the need for a wall-clock timer
@@ -520,8 +535,24 @@ class AAProfile(dbus.service.Object):
             _close_rejection_fd(fd)
             return
 
+        # Per-MAC RFCOMM cooldown: during cooldown, just close the fd silently
+        # without doing the exchange. Completing the exchange while a session is
+        # active causes the phone to show a Communication Error dialog (even
+        # though the session is healthy). Using os.close() (not SHUT_RDWR)
+        # so the phone doesn't interpret it as a profile rejection.
+        last_exchange = _last_rfcomm_exchange_at.get(connecting_mac, 0.0)
+        since_last = time.monotonic() - last_exchange
+        is_cooldown = since_last < RFCOMM_COOLDOWN_SEC
+        if is_cooldown:
+            oal_print(f"AA RFCOMM from {connecting_mac} during cooldown ({since_last:.1f}s) — closing silently", flush=True)
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            return
+
         oal_print(f"AA RFCOMM NewConnection from {device} fd={fd} mac={connecting_mac}", flush=True)
-        threading.Thread(target=handle_aa_rfcomm, args=(fd, connecting_mac), daemon=True).start()
+        threading.Thread(target=handle_aa_rfcomm, args=(fd, connecting_mac, False), daemon=True).start()
     @dbus.service.method(PROFILE_IFACE, in_signature="o", out_signature="")
     def RequestDisconnection(self, dev): oal_print(f"AA disconnect {dev}", flush=True)
     @dbus.service.method(PROFILE_IFACE, in_signature="", out_signature="")

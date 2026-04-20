@@ -162,6 +162,7 @@ private:
     bool app_connected_ = false;
     bool phone_connected_ = false;
     bool session_active_ = false;
+    bool aa_config_pending_restart_ = false;  // config_update set AA-affecting params; restart_services must restart BT
     std::string phone_name_;
     uint64_t mic_frame_count_ = 0;
 

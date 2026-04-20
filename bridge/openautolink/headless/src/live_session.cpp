@@ -3,6 +3,7 @@
 #include "openautolink/live_session.hpp"
 #include "openautolink/oal_session.hpp"
 #include "openautolink/oal_protocol.hpp"
+#include "openautolink/oal_log.hpp"
 
 #include <cstring>
 #include <chrono>
@@ -442,9 +443,19 @@ void HeadlessAutoEntity::onHandshake(const aasdk::common::DataConstBuffer& paylo
                 });
             control_channel_->sendHandshake(std::move(handshakeData), std::move(promise));
         } else {
-            // Handshake complete ??? send auth complete
+            // Handshake complete — send auth complete
             std::cerr << "[aasdk] onHandshake: TLS HANDSHAKE COMPLETE!" << std::endl;
             output_.emit(json_event("auth_complete"));
+
+            // Notify the session that the handshake succeeded.
+            // This is where on_phone_connected should fire — NOT before
+            // the handshake, because the car app's video/audio TCP connections
+            // compete with the handshake on the io_service and can delay the
+            // TLS response enough for the phone to timeout and RST.
+            if (handshake_complete_cb_) {
+                handshake_complete_cb_();
+                handshake_complete_cb_ = nullptr;  // one-shot
+            }
 
             aap_protobuf::service::control::message::AuthResponse auth;
             auth.set_status(aap_protobuf::shared::STATUS_SUCCESS);
@@ -979,12 +990,16 @@ void LiveAasdkSession::start_dual_mode() {
     running_ = true;
     io_work_ = std::make_unique<boost::asio::io_service::work>(io_service_);
 
-    // 1. Start USB host scanning (if libusb is available)
-    std::cerr << "[aasdk] Starting dual mode (wired + wireless)" << std::endl;
-    output_.emit(R"({"type":"event","event_type":"dual_mode_starting"})");
+    // 1. Start USB host scanning ONLY if explicitly configured for wired AA.
+    // In wireless mode (default), USB scanning floods the io_service with
+    // continuous libusb polls that compete with AA protocol messages and can
+    // delay SSL handshake responses enough for the phone to timeout.
+    if (config_.use_usb_host) {
+        std::cerr << "[aasdk] Starting dual mode (wired + wireless)" << std::endl;
+        output_.emit(R"({"type":"event","event_type":"dual_mode_starting"})");
 
-    libusb_context* usbContext = nullptr;
-    if (libusb_init(&usbContext) == 0 && usbContext) {
+        libusb_context* usbContext = nullptr;
+        if (libusb_init(&usbContext) == 0 && usbContext) {
         auto usbWrapper = std::make_shared<aasdk::usb::USBWrapper>(usbContext);
         auto queryFactory = std::make_shared<aasdk::usb::AccessoryModeQueryFactory>(
             *usbWrapper, io_service_);
@@ -1012,6 +1027,10 @@ void LiveAasdkSession::start_dual_mode() {
         std::cerr << "[aasdk] USB host scanning active" << std::endl;
     } else {
         std::cerr << "[aasdk] libusb init failed, USB host disabled" << std::endl;
+    }
+    } else {
+        std::cerr << "[aasdk] Wireless-only mode (USB scanning disabled)" << std::endl;
+        output_.emit(R"({"type":"event","event_type":"wireless_mode_starting"})");
     }
 
     // 2. Start wireless TCP listener for phone AA connections
@@ -1838,7 +1857,7 @@ void LiveAasdkSession::restart_with_config(const HeadlessConfig& new_config) {
         output_.emit(R"({"type":"event","event_type":"config_changed","message":"AA session restarting with new config"})");
         state_.connected = false;
         active_transport_ = TransportType::NONE;
-        wireless_peer_ip_.clear();
+        // Keep wireless_peer_ip_ for cooldown
         entity_.reset();
 
         // Notify OAL session that phone disconnected (sends phone_disconnected to app,
@@ -1878,7 +1897,7 @@ void LiveAasdkSession::graceful_disconnect_phone(std::function<void()> completio
         entity_->graceful_shutdown([this, cb = std::move(completion_cb)]() {
             state_.connected = false;
             active_transport_ = TransportType::NONE;
-            wireless_peer_ip_.clear();
+            // Keep wireless_peer_ip_ for cooldown
             entity_.reset();
             if (oal_session_) {
                 oal_session_->on_phone_disconnected("graceful_shutdown");
@@ -2057,6 +2076,18 @@ void LiveAasdkSession::accept_connection() {
                     return;
                 }
 
+                // If we recently created an entity for this same peer and it's
+                // still active (in handshake or streaming), reject the duplicate.
+                // Once the entity finishes (disconnect callback fires, entity_
+                // is reset), the next TCP from the same peer is accepted immediately.
+                if (!wireless_peer_ip_.empty() && peer_ip == wireless_peer_ip_ && entity_) {
+                    BLOG << "[aasdk] Duplicate TCP from " << peer_ip
+                              << " rejected (entity active)" << std::endl;
+                    socket->close();
+                    accept_connection();
+                    return;
+                }
+
                 std::cerr << "[aasdk] TCP client connected (wireless) peer=" << peer_ip << std::endl;
                 output_.emit(R"({"type":"event","event_type":"phone_connected","transport":"wireless"})");
                 state_.connected = true;
@@ -2139,7 +2170,10 @@ void LiveAasdkSession::create_entity(aasdk::transport::ITransport::Pointer trans
         state_.connected = false;
         state_.session_active = false;
         active_transport_ = TransportType::NONE;
-        wireless_peer_ip_.clear();
+        // Don't clear wireless_peer_ip_ here — it must persist for the
+        // same-IP cooldown timer that prevents SSL handshake cycling.
+        // The phone fires rapid TCP reconnects after a failed handshake;
+        // keeping the IP lets accept_connection() reject duplicates.
         entity_.reset();
         if (oal_session_) {
             oal_session_->on_phone_disconnected();
@@ -2162,11 +2196,21 @@ void LiveAasdkSession::create_entity(aasdk::transport::ITransport::Pointer trans
     // Propagate session to entity (which propagates to handlers)
     if (oal_session_) {
         entity_->set_oal_session(oal_session_);
-        oal_session_->on_phone_connected(phone_name_);
+        // DEFER on_phone_connected until TLS handshake completes.
+        // Calling it here (before handshake) causes the car app to connect
+        // video/audio TCP channels immediately, which compete with the
+        // phone's handshake on the io_service and delay the TLS response
+        // enough for the phone to timeout and RST the connection.
+        entity_->set_handshake_complete_callback([this]() {
+            if (oal_session_) {
+                oal_session_->on_phone_connected(phone_name_);
+            }
+        });
     }
 
     entity_->start();
     state_.session_active = true;
+    last_entity_created_ = std::chrono::steady_clock::now();
 }
 
 void LiveAasdkSession::create_entity_no_ssl(aasdk::transport::ITransport::Pointer transport) {
@@ -2202,7 +2246,7 @@ void LiveAasdkSession::create_entity_no_ssl(aasdk::transport::ITransport::Pointe
         state_.connected = false;
         state_.session_active = false;
         active_transport_ = TransportType::NONE;
-        wireless_peer_ip_.clear();
+        // Don't clear wireless_peer_ip_ — same reason as create_entity() callback
         entity_.reset();
         if (oal_session_) {
             oal_session_->on_phone_disconnected();
@@ -2223,7 +2267,12 @@ void LiveAasdkSession::create_entity_no_ssl(aasdk::transport::ITransport::Pointe
     // Propagate session to entity
     if (oal_session_) {
         entity_->set_oal_session(oal_session_);
-        oal_session_->on_phone_connected(phone_name_);
+        // Same deferred notification as create_entity() — wait for handshake
+        entity_->set_handshake_complete_callback([this]() {
+            if (oal_session_) {
+                oal_session_->on_phone_connected(phone_name_);
+            }
+        });
     }
 
     // Start the entity — it will send version request as the first thing inside the TLS tunnel

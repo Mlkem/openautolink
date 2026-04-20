@@ -648,23 +648,11 @@ void OalSession::handle_app_hello(const std::string& json) {
             case 5: video_w = 3840; video_h = 2160; break;
         }
 
-        // pixel_aspect_ratio: auto-computed from display aspect ratio vs video
-        // aspect ratio. Tells the phone to pre-distort rendering so circles
-        // remain circular when the app scales the video to fill the display.
-        // Only auto-computed when no manual override from env/CLI/config_update.
-        if (!config_.pixel_aspect_explicit) {
-            double display_ar = static_cast<double>(display_w) / display_h;
-            double video_ar = static_cast<double>(video_w) / video_h;
-            if (display_ar > 0 && video_ar > 0 && display_ar != video_ar) {
-                uint32_t pa = static_cast<uint32_t>(display_ar / video_ar * 10000);
-                if (pa != 10000) {
-                    config_.aa_ui_experiment.pixel_aspect_ratio_e4 = pa;
-                    BLOG << "[OAL] auto pixel_aspect=" << pa
-                              << " (display=" << display_w << "x" << display_h
-                              << " video=" << video_w << "x" << video_h << ")" << std::endl;
-                }
-            }
-        } else if (config_.aa_ui_experiment.pixel_aspect_ratio_e4 > 0) {
+        // pixel_aspect_ratio: NOT auto-computed — leave at 0 (square pixels)
+        // by default. User can override via Settings > Video > Pixel Aspect.
+        // Auto-computing caused phone AA process crashes (Communication Error 6)
+        // with values like 14454 from display/video AR mismatch.
+        if (config_.aa_ui_experiment.pixel_aspect_ratio_e4 > 0) {
             BLOG << "[OAL] pixel_aspect_ratio=" << config_.aa_ui_experiment.pixel_aspect_ratio_e4
                       << " (manual override)" << std::endl;
         }
@@ -1088,18 +1076,17 @@ void OalSession::handle_config_update(const std::string& json) {
         if (!env_update.empty())
             system(env_update.c_str());
 
-        // Only restart AA session for stream-affecting changes (codec, fps, resolution, dpi, drive side)
+        // For AA-affecting config changes (codec, resolution, DPI, etc.),
+        // do an in-process AA session restart. This sends ByeByeRequest to the
+        // phone, then the phone's own RFCOMM retry cycle triggers reconnection
+        // with the new config. No bridge process kill or BT restart needed.
         if (config_changed) {
 #ifdef PI_AA_ENABLE_AASDK_LIVE
-            if (aa_session_) {
-                // restart_with_config sends ByeByeRequest to phone first (graceful),
-                // then calls on_phone_disconnected("config_changed") in its completion
-                // callback once the phone acknowledges or the timeout expires.
-                // Do NOT send phone_disconnected here — that causes a double-notify
-                // and the app tears down channels before the phone gets the ByeBye.
+            if (aa_session_ && phone_connected_) {
                 aa_session_->restart_with_config(config_);
             }
 #endif
+            aa_config_pending_restart_ = true;
         }
     }
 
@@ -1126,11 +1113,32 @@ void OalSession::handle_restart_services(const std::string& json) {
         restart_bt = true;
     }
 
+    // If config_update already did the in-process AA restart (ByeByeRequest),
+    // we need to restart BT to trigger the phone's reconnection cycle
+    // (RFCOMM → WiFi → TCP). The phone never auto-reconnects after ByeBye
+    // without a BT kick. But we do NOT restart the bridge process — that
+    // would kill our TCP listeners and cause Communication Error 6.
+    if (aa_config_pending_restart_) {
+        aa_config_pending_restart_ = false;
+        restart_bt = true;
+        BLOG << "[OAL] restart_services: forcing BT-only restart for AA config change (bridge stays alive)" << std::endl;
+    }
+
     BLOG << "[OAL] restart_services: wireless=" << restart_wireless
               << " bt=" << restart_bt << std::endl;
 
-    // Build the systemd restart command. The bridge service restarts itself last,
-    // which terminates this process — the app will reconnect automatically.
+    // If neither WiFi nor BT needs restarting and no AA config changed,
+    // nothing to do — infra-only changes (head_unit_name, bt_mac) were
+    // already persisted to env by config_update.
+    if (!restart_wireless && !restart_bt) {
+        BLOG << "[OAL] restart_services: no restart needed (infra-only changes)" << std::endl;
+        send_control_line(R"({"type":"event","event_type":"config_applied","message":"Config saved"})");
+        return;
+    }
+
+    // Build the restart command. For config-only changes (no wireless restart
+    // requested by app), restart BT only — do NOT restart the bridge process.
+    // Killing the bridge causes Communication Error 6 on the phone.
     std::string cmd;
     if (restart_wireless) {
         cmd += "sudo systemctl restart openautolink-wireless 2>/dev/null; ";
@@ -1138,8 +1146,13 @@ void OalSession::handle_restart_services(const std::string& json) {
     if (restart_bt) {
         cmd += "sudo systemctl restart openautolink-bt 2>/dev/null; ";
     }
-    // Always restart the bridge itself (this kills us, app auto-reconnects)
-    cmd += "sudo systemctl restart openautolink.service &";
+    // Only restart the bridge if WiFi was restarted (needs fresh network state)
+    // or if the app explicitly requested BT restart (not from config_changed).
+    // Config-only changes handle the AA session in-process via restart_with_config(),
+    // so killing the bridge is unnecessary and causes Communication Error 6.
+    if (restart_wireless) {
+        cmd += "sudo systemctl restart openautolink.service &";
+    }
 
     // Notify app that restart is happening
     send_control_line(R"({"type":"event","event_type":"restarting","wireless":)" +

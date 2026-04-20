@@ -64,6 +64,9 @@ tmp_bugreport.zip
 tmp_bugreport/
 tmp_screenshot.*
 
+# Code review output
+codereview.md
+
 # NDK build intermediates
 app/.cxx/
 
