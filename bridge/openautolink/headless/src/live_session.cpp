@@ -796,9 +796,32 @@ void HeadlessAutoEntity::onAudioFocusRequest(
     const aap_protobuf::service::control::message::AudioFocusRequest& request)
 {
     auto focus_type = request.audio_focus_type();
-    auto state = (focus_type == 0)
-        ? aap_protobuf::service::control::message::AudioFocusStateType::AUDIO_FOCUS_STATE_LOSS
-        : aap_protobuf::service::control::message::AudioFocusStateType::AUDIO_FOCUS_STATE_GAIN;
+
+    // Map request type to the matching response state:
+    //   GAIN (1) → STATE_GAIN (1)
+    //   GAIN_TRANSIENT (2) → STATE_GAIN_TRANSIENT (2)
+    //   GAIN_TRANSIENT_MAY_DUCK (3) → STATE_GAIN_TRANSIENT (2)
+    //   RELEASE (4) → STATE_LOSS (3)
+    //   unknown/0 → STATE_LOSS (3)
+    aap_protobuf::service::control::message::AudioFocusStateType state;
+    switch (focus_type) {
+        case aap_protobuf::service::control::message::AUDIO_FOCUS_GAIN:
+            state = aap_protobuf::service::control::message::AUDIO_FOCUS_STATE_GAIN;
+            break;
+        case aap_protobuf::service::control::message::AUDIO_FOCUS_GAIN_TRANSIENT:
+        case aap_protobuf::service::control::message::AUDIO_FOCUS_GAIN_TRANSIENT_MAY_DUCK:
+            state = aap_protobuf::service::control::message::AUDIO_FOCUS_STATE_GAIN_TRANSIENT;
+            break;
+        case aap_protobuf::service::control::message::AUDIO_FOCUS_RELEASE:
+            state = aap_protobuf::service::control::message::AUDIO_FOCUS_STATE_LOSS;
+            break;
+        default:
+            state = aap_protobuf::service::control::message::AUDIO_FOCUS_STATE_LOSS;
+            break;
+    }
+
+    BLOG << "[aasdk] AudioFocusRequest: type=" << focus_type
+              << " -> response state=" << static_cast<int>(state) << std::endl;
 
     aap_protobuf::service::control::message::AudioFocusNotification response;
     response.set_focus_state(state);
