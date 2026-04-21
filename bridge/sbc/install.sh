@@ -262,38 +262,12 @@ fi
 # Clean up
 rm -rf "$TMP_DIR"
 
-# ── 8. Apply network now ─────────────────────────────────────────────
-echo ">>> [6/6] Applying network configuration..."
+# ── 6. Reboot ─────────────────────────────────────────────────────────
+echo ">>> [6/6] Done — rebooting to start all services..."
 echo ""
-
-# Detect the onboard NIC (not USB — check sysfs bus path)
-ONBOARD_NIC=""
-for name in eth0 end0; do
-    if [ -d "/sys/class/net/$name" ]; then
-        devpath=$(readlink -f "/sys/class/net/$name/device" 2>/dev/null)
-        case "$devpath" in */usb*) continue ;; esac
-        ONBOARD_NIC="$name"
-        break
-    fi
-done
-if [ -z "$ONBOARD_NIC" ]; then
-    for path in /sys/class/net/*; do
-        iface=$(basename "$path")
-        case "$iface" in lo|usb*|wlan*|enx*) continue ;; esac
-        devpath=$(readlink -f "/sys/class/net/$iface/device" 2>/dev/null)
-        case "$devpath" in */usb*) continue ;; esac
-        ONBOARD_NIC="$iface"
-        break
-    done
-fi
 
 source /etc/openautolink.env 2>/dev/null || true
-CAR_IP="${OAL_CAR_NET_IP:-192.168.222.222}"
 
-# Start the network service now (assigns car IP to onboard NIC)
-systemctl start openautolink-network 2>/dev/null || true
-
-echo ""
 echo "=== Installation complete ==="
 echo ""
 echo "  Binary:   ${INSTALL_DIR}/bin/openautolink-headless"
@@ -301,10 +275,10 @@ echo "  Config:   /etc/openautolink.env"
 echo "  Hostname: openautolink"
 echo "  Version:  ${LATEST_TAG}"
 echo ""
-echo "  Network (active now):"
-echo "    Onboard NIC (${ONBOARD_NIC:-unknown}) -> ${CAR_IP}  (car connection)"
-echo "    USB NIC (if plugged in)    -> DHCP        (SSH access)"
-echo "    WiFi radio                 -> phone hotspot (after reboot)"
+echo "  After reboot:"
+echo "    Onboard NIC -> ${OAL_CAR_NET_IP:-192.168.222.222}  (car connection)"
+echo "    USB NIC     -> DHCP/static      (SSH access)"
+echo "    WiFi radio  -> phone hotspot"
 echo ""
 echo "  To SSH into the SBC in the car:"
 echo "    - Plug a USB Ethernet adapter into the SBC"
@@ -315,5 +289,6 @@ echo "  Updates:"
 echo "    The bridge auto-updates via the car app. No manual action needed."
 echo "    To disable: Set OAL_BRIDGE_UPDATE_MODE=disabled in /etc/openautolink.env"
 echo ""
-echo "  Reboot to start all services: sudo reboot"
-echo ""
+
+# Reboot after a short delay so the user sees the summary
+nohup bash -c "sleep 3 && reboot" >/dev/null 2>&1 &

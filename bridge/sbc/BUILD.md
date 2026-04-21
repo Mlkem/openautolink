@@ -72,7 +72,7 @@ The installer will:
 4. Create `/etc/openautolink.env` (your main config file — preserved on re-install)
 5. Set hostname to `openautolink` and enable mDNS (Avahi)
 6. Install and enable systemd services
-7. Apply the network configuration immediately
+7. Reboot automatically to start all services
 
 **Starting from scratch?** If you're having issues and want a clean slate, add `--fresh` to reset the config and clear Bluetooth pairings:
 
