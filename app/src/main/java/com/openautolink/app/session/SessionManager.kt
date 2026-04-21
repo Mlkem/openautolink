@@ -115,6 +115,10 @@ class SessionManager(
     private val _bridgeInfo = MutableStateFlow<BridgeInfo?>(null)
     val bridgeInfo: StateFlow<BridgeInfo?> = _bridgeInfo.asStateFlow()
 
+    /** When true, config_echo writes to DataStore are suppressed so the user's
+     *  in-progress edits in Settings aren't overwritten by bridge echo. */
+    @Volatile var settingsOpen: Boolean = false
+
     val controlMessages get() = connectionManager.controlMessages
 
     // Video decoder — created per session, accessible for UI binding
@@ -882,9 +886,12 @@ class SessionManager(
                 _bridgeUpdateManager?.onUpdateMessage(message)
             }
             is ControlMessage.ConfigEcho -> {
-                // Bridge sent its current config — always update app's DataStore.
-                // Bridge is the single source of truth for bridge-owned settings.
-                // Echoes are sent after: initial connect, config_update, codec negotiation.
+                // Bridge sent its current config — update app's DataStore unless
+                // Settings UI is open (user may be staging edits before Save & Restart).
+                if (settingsOpen) {
+                    Log.d(TAG, "Suppressed config_echo (Settings open): ${message.config.keys}")
+                    return
+                }
                 scope.launch {
                     val ctx = context ?: return@launch
                     try {

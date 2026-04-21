@@ -75,6 +75,11 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
     @Volatile private var lastTransportNetworkEventAt: Long = 0L
     private val trackedTransportNetworks = mutableSetOf<Long>()
 
+    /** Suppress config_echo DataStore writes while Settings is open. */
+    fun setSettingsOpen(open: Boolean) {
+        sessionManager.settingsOpen = open
+    }
+
     private val touchForwarder: TouchForwarder = TouchForwarderImpl { touchMessage ->
         viewModelScope.launch {
             sessionManager.sendControlMessage(touchMessage)

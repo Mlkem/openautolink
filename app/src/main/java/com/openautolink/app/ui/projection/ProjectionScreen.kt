@@ -35,6 +35,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -81,6 +82,11 @@ fun ProjectionScreen(
     // Settings overlay state — panel slides from left, video keeps playing
     // rememberSaveable: survives navigation to SafeAreaEditorScreen and back
     var showSettings by rememberSaveable { mutableStateOf(false) }
+
+    // Suppress config_echo DataStore writes while Settings is open
+    LaunchedEffect(showSettings) {
+        viewModel.setSettingsOpen(showSettings)
+    }
 
     DisposableEffect(Unit) {
         viewModel.connect()

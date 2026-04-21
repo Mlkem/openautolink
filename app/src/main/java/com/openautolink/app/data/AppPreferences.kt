@@ -582,6 +582,9 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
     /**
      * Update DataStore from bridge's config_echo so Settings UI shows the
      * bridge's actual running values. Called on each connection.
+     *
+     * Callers should skip calling this while the Settings UI is open —
+     * otherwise the bridge's echo overwrites user edits before Save & Restart.
      */
     suspend fun applyConfigEcho(config: Map<String, String>) {
         dataStore.edit { prefs ->
