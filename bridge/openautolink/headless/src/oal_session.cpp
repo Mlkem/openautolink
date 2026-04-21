@@ -1520,7 +1520,12 @@ void OalSession::handle_switch_phone(const std::string& json) {
     //    because only the old phone is on the AP (the new phone hasn't gotten
     //    WiFi credentials yet).
     // 2. Disconnect all BT devices except the target.
-    // 3. Connect BT to the target.
+    //
+    // NOTE: We do NOT `bluetoothctl connect` the target here. That races with
+    // the BT script's reconnect worker and can connect via LE instead of BR/EDR,
+    // which doesn't trigger the phone's AA RFCOMM flow. The reconnect worker
+    // sees the switch override and connects via _connect_device() which does
+    // proper ConnectProfile(HFP_AG) → BR/EDR.
     std::string bt_cmd = "( ";
     bt_cmd += "for sta in $(iw dev wlan0 station dump 2>/dev/null | grep '^Station' | awk '{print $2}'); do "
               "  iw dev wlan0 station del \"$sta\" 2>/dev/null; "
@@ -1530,8 +1535,6 @@ void OalSession::handle_switch_phone(const std::string& json) {
               "    bluetoothctl disconnect \"$dev\" 2>/dev/null; "
               "  fi; "
               "done; ";
-    bt_cmd += "sleep 1; ";
-    bt_cmd += "bluetoothctl connect " + mac + " 2>/dev/null; ";
     bt_cmd += ") &";
 
     // Gracefully disconnect phone first (ByeByeRequest), then do BT switch

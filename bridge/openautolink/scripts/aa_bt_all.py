@@ -411,7 +411,11 @@ def _reconnect_worker():
                     _connect_device(path)
         except Exception as e:
             oal_print(f"Phone connect: {e}", flush=True)
-        time.sleep(RECONNECT_INTERVAL_SEC)
+        # Poll faster during an active switch (3s vs 15s) for responsive handoff
+        if _read_switch_override():
+            time.sleep(3)
+        else:
+            time.sleep(RECONNECT_INTERVAL_SEC)
 
 # ---- Minimal protobuf encoding (no library needed) ----
 def _varint(v):
