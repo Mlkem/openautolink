@@ -459,6 +459,17 @@ def handle_aa_rfcomm(fd, connecting_mac=""):
         if connecting_mac:
             _last_rfcomm_exchange_at[connecting_mac] = time.monotonic()
 
+        # Record the active phone MAC so the C++ bridge can mark aa_active
+        # in the paired_phones response. Written to tmpfs — lost on reboot,
+        # which is correct (no AA session survives reboot).
+        if connecting_mac:
+            try:
+                os.makedirs("/run/openautolink", exist_ok=True)
+                with open("/run/openautolink/active_phone_mac", "w") as f:
+                    f.write(connecting_mac + "\n")
+            except OSError:
+                pass
+
         # Auto-set this phone as the default if no default is configured yet.
         # Ensures single-phone users get proper RFCOMM gating automatically,
         # and the first phone paired always wins in multi-phone boot races.

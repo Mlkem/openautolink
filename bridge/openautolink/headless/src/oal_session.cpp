@@ -1377,6 +1377,22 @@ void OalSession::send_paired_phones() {
         pclose(conn_pipe);
     }
 
+    // Read the active phone's BT MAC (written by BT script on RFCOMM success)
+    std::string active_phone_mac;
+    if (phone_connected_) {
+        FILE* mac_file = std::fopen("/run/openautolink/active_phone_mac", "r");
+        if (mac_file) {
+            char mbuf[32];
+            if (std::fgets(mbuf, sizeof(mbuf), mac_file)) {
+                active_phone_mac = mbuf;
+                while (!active_phone_mac.empty() &&
+                       (active_phone_mac.back() == '\n' || active_phone_mac.back() == '\r'))
+                    active_phone_mac.pop_back();
+            }
+            std::fclose(mac_file);
+        }
+    }
+
     std::ostringstream oss;
     oss << R"({"type":"paired_phones","phones":[)";
 
@@ -1398,10 +1414,9 @@ void OalSession::send_paired_phones() {
         bool connected = connected_macs.find(mac) != std::string::npos;
 
         // aa_active: this phone has the active Android Auto session.
-        // phone_name_ is set by aasdk on AA handshake — compare with the
-        // device name from BlueZ. Also check MAC if we tracked it.
-        bool aa_active = phone_connected_ && connected && !phone_name_.empty() &&
-                         name.find(phone_name_) != std::string::npos;
+        // Matched by BT MAC written by the BT script on RFCOMM success.
+        bool aa_active = phone_connected_ && !active_phone_mac.empty() &&
+                         mac == active_phone_mac;
 
         if (!first) oss << ",";
         first = false;
