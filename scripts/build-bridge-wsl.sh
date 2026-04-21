@@ -88,16 +88,22 @@ EOF
 
 cd "$WSL_BUILD"
 
-# Read version from secrets/version.properties if available
-BRIDGE_VERSION="dev"
+# Read base version from secrets/version.properties if available
+BASE_BRIDGE_VERSION="dev"
 VERSION_FILE="${REPO_ROOT}/secrets/version.properties"
 if [ -f "$VERSION_FILE" ]; then
     VER=$(grep '^versionName=' "$VERSION_FILE" | cut -d= -f2)
     if [ -n "$VER" ]; then
-        BRIDGE_VERSION="$VER"
+        BASE_BRIDGE_VERSION="$VER"
     fi
 fi
+
+# Local/dev builds must never collide with GitHub release numbering.
+# Encode local provenance directly in the compiled bridge version.
+LOCAL_SHA=$(git -C "$REPO_ROOT" rev-parse --short=8 HEAD 2>/dev/null || echo "nogit")
+BRIDGE_VERSION="${BASE_BRIDGE_VERSION}-local.${LOCAL_SHA}"
 echo "  Bridge version: ${BRIDGE_VERSION}"
+echo "  Build source: local"
 
 if [ ! -f CMakeCache.txt ]; then
     echo ">>> Configuring CMake..."
@@ -110,15 +116,17 @@ if [ ! -f CMakeCache.txt ]; then
         -DSKIP_BUILD_ABSL=ON \
         -DSKIP_BUILD_PROTOBUF=ON \
         -DBUILD_AASDK_STATIC=ON \
-        -DOAL_BRIDGE_VERSION="$BRIDGE_VERSION"
+        -DOAL_BRIDGE_VERSION="$BRIDGE_VERSION" \
+        -DOAL_BUILD_SOURCE="local"
     echo ""
 else
     # Always update version in cached builds — it's compiled into the binary
     # via add_compile_definitions and won't update unless we tell CMake.
     CACHED_VER=$(grep '^OAL_BRIDGE_VERSION:' CMakeCache.txt | cut -d= -f2)
-    if [ "$CACHED_VER" != "$BRIDGE_VERSION" ]; then
-        echo ">>> Updating cached version: $CACHED_VER -> $BRIDGE_VERSION"
-        cmake . -DOAL_BRIDGE_VERSION="$BRIDGE_VERSION" >/dev/null 2>&1
+    CACHED_SRC=$(grep '^OAL_BUILD_SOURCE:' CMakeCache.txt | cut -d= -f2)
+    if [ "$CACHED_VER" != "$BRIDGE_VERSION" ] || [ "$CACHED_SRC" != "local" ]; then
+        echo ">>> Updating cached bridge metadata: version/source"
+        cmake . -DOAL_BRIDGE_VERSION="$BRIDGE_VERSION" -DOAL_BUILD_SOURCE="local" >/dev/null 2>&1
     fi
 fi
 

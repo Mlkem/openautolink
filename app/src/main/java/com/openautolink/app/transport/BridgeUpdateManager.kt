@@ -261,10 +261,13 @@ class BridgeUpdateManager(
 
         // Guard: bridge is running a local/dev build — don't auto-overwrite it.
         // Manual trigger from Settings bypasses this (user explicitly confirmed).
-        val buildSource = bridgeInfo.buildSource
-        if (buildSource == "local" && !isManualCheck) {
+        // Fallback for older bridges: detect local suffix in bridge_version.
+        val buildSource = bridgeInfo.buildSource?.trim()?.lowercase()
+        val versionLooksLocal = bridgeInfo.bridgeVersion?.contains("-local.", ignoreCase = true) == true
+        val isLocalBuild = (buildSource == "local") || versionLooksLocal
+        if (isLocalBuild && !isManualCheck) {
             Log.i(TAG, "Bridge is a local/dev build — skipping auto-update")
-            DiagnosticLog.i("update", "Bridge has build_source=local — requires manual confirmation to overwrite with GitHub release")
+            DiagnosticLog.i("update", "Bridge is local/dev build_source=$buildSource version=${bridgeInfo.bridgeVersion} — requires manual confirmation to overwrite with GitHub release")
             _updateMessage.value = "Bridge is a dev build — use Settings to update to ${release.version}"
             addHistory("Skipped: bridge is a local/dev build")
             return

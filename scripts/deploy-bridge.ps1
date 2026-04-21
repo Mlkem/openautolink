@@ -191,8 +191,11 @@ if (Test-Path $applyScript) {
 $versionFile = Join-Path $RepoRoot "secrets\version.properties"
 if (Test-Path $versionFile) {
     $ver = (Get-Content $versionFile | Select-String "^versionName=").ToString().Split("=")[1]
-    Write-Host ">>> Stamping version $ver..." -ForegroundColor Yellow
-    Invoke-Ssh "grep -q '^OAL_VERSION=' /etc/openautolink.env && sudo sed -i 's/^OAL_VERSION=.*/OAL_VERSION=$ver/' /etc/openautolink.env || echo 'OAL_VERSION=$ver' | sudo tee -a /etc/openautolink.env"
+    $gitSha = (git -C $RepoRoot rev-parse --short=8 HEAD 2>$null)
+    if (-not $gitSha) { $gitSha = "nogit" }
+    $localVer = "$ver-local.$gitSha"
+    Write-Host ">>> Stamping version $localVer..." -ForegroundColor Yellow
+    Invoke-Ssh "grep -q '^OAL_VERSION=' /etc/openautolink.env && sudo sed -i 's/^OAL_VERSION=.*/OAL_VERSION=$localVer/' /etc/openautolink.env || echo 'OAL_VERSION=$localVer' | sudo tee -a /etc/openautolink.env"
 }
 
 # ── Step 6: Start service ─────────────────────────────────────────────

@@ -308,6 +308,14 @@ Developers building locally:
 4. Deploy via SCP: `scripts/deploy-bridge.ps1`
 5. Iterate freely — no auto-update interference
 
+Local build identity:
+
+- Local bridge binaries are compiled with version suffix: `X.Y.Z-local.<gitsha>`
+- GitHub release bridge binaries keep plain semver: `X.Y.Z`
+- `deploy-bridge.ps1` stamps `OAL_VERSION=X.Y.Z-local.<gitsha>` so bridge and BT logs clearly show local provenance
+- App updater treats either `build_source=local` or `bridge_version` containing `-local.` as local/dev and skips auto-overwrite
+- Manual **Check for Update** in Settings still overrides this guard and can intentionally install the GitHub release
+
 When done:
 1. Set `OAL_BRIDGE_UPDATE_MODE=auto` in env
 2. Enable auto-update in app Settings
