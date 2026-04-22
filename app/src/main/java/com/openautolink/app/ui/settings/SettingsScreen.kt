@@ -78,6 +78,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 
 import com.openautolink.app.session.SessionState
 import com.openautolink.app.transport.ControlMessage
+import androidx.compose.material3.FilterChip
 
 private enum class SettingsTab(
     val title: String,
@@ -120,7 +121,7 @@ fun SettingsScreen(
     onNavigateToDiagnostics: () -> Unit = {},
     onNavigateToSafeAreaEditor: () -> Unit = {},
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val uiState by viewModel.settingsState.collectAsStateWithLifecycle()
     var selectedTab by remember { mutableStateOf(SettingsTab.CONNECTION) }
     val bridgeConnected = sessionState != SessionState.IDLE &&
             sessionState != SessionState.ERROR &&
@@ -457,7 +458,38 @@ private fun ConnectionTab(viewModel: SettingsViewModel, uiState: SettingsUiState
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // --- Bridge Connection Section ---
+        // --- Connection Mode Section ---
+        SectionHeader("Connection Mode")
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            listOf("direct" to "Direct (No Bridge)", "bridge" to "Bridge (SBC)").forEach { (mode, label) ->
+                FilterChip(
+                    selected = uiState.connectionMode == mode,
+                    onClick = { viewModel.updateConnectionMode(mode) },
+                    label = { Text(label) },
+                )
+            }
+        }
+
+        Text(
+            text = if (uiState.connectionMode == "direct")
+                "Phone connects via WiFi hotspot directly to this head unit. No SBC hardware needed."
+            else
+                "Phone connects through an SBC bridge device via USB Ethernet.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // --- Bridge Connection Section (only shown in bridge mode) ---
+        if (uiState.connectionMode == "bridge") {
         SectionHeader("Bridge Connection")
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -512,6 +544,7 @@ private fun ConnectionTab(viewModel: SettingsViewModel, uiState: SettingsUiState
         HorizontalDivider(modifier = Modifier.fillMaxWidth(0.5f))
 
         Spacer(modifier = Modifier.height(24.dp))
+        } // end if (bridge mode)
 
         SectionHeader("Network Discovery")
 

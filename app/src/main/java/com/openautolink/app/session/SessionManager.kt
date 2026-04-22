@@ -701,7 +701,28 @@ class SessionManager(
 
     /** Send a control message to the bridge (used by touch forwarding, etc.). */
     suspend fun sendControlMessage(message: ControlMessage) {
-        connectionManager.sendControlMessage(message)
+        if (activeConnectionMode == "direct") {
+            val session = directSession ?: return
+            when (message) {
+                is ControlMessage.Touch -> session.sendMessage(
+                    com.openautolink.app.transport.direct.AaMessageConverter.touchToProto(message)
+                )
+                is ControlMessage.VehicleData -> session.sendMessage(
+                    com.openautolink.app.transport.direct.AaMessageConverter.vehicleDataToProto(message)
+                )
+                is ControlMessage.Button -> session.sendMessage(
+                    com.openautolink.app.transport.direct.AaMessageConverter.buttonToProto(message)
+                )
+                is ControlMessage.Gnss -> {
+                    // In direct mode, phone has its own GPS via hotspot.
+                    // GNSS NMEA forwarding is bridge-specific (car GPS → bridge → phone).
+                    // Skip in direct mode — phone GPS is typically better anyway.
+                }
+                else -> {} // Other message types (config_update, restart, etc.) are bridge-specific
+            }
+        } else {
+            connectionManager.sendControlMessage(message)
+        }
     }
 
     /**

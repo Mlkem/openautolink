@@ -346,6 +346,10 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
         dataStore.edit { it[BRIDGE_HOST] = host }
     }
 
+    suspend fun updateConnectionMode(mode: String) {
+        dataStore.edit { it[CONNECTION_MODE] = mode }
+    }
+
     suspend fun setBridgePort(port: Int) {
         dataStore.edit { it[BRIDGE_PORT] = port }
     }

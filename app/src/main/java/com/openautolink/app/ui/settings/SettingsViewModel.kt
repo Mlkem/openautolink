@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 data class SettingsUiState(
+    val connectionMode: String = AppPreferences.DEFAULT_CONNECTION_MODE,
     val bridgeHost: String = AppPreferences.DEFAULT_BRIDGE_HOST,
     val bridgePort: Int = AppPreferences.DEFAULT_BRIDGE_PORT,
     val videoAutoNegotiate: Boolean = AppPreferences.DEFAULT_VIDEO_AUTO_NEGOTIATE,
@@ -186,7 +187,33 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         SharingStarted.WhileSubscribed(5000),
         SettingsUiState()
     )
+    init {
+        // connectionMode can't fit in the main combine (44 flows already at limit).
+        // Observe separately and merge into uiState.
+        viewModelScope.launch {
+            preferences.connectionMode.collect { mode ->
+                _connectionModeOverride.value = mode
+            }
+        }
+    }
 
+    private val _connectionModeOverride = MutableStateFlow(AppPreferences.DEFAULT_CONNECTION_MODE)
+
+    // Expose combined state with connectionMode
+    val settingsState: StateFlow<SettingsUiState> = combine(
+        uiState,
+        _connectionModeOverride
+    ) { state, mode ->
+        state.copy(connectionMode = mode)
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        SettingsUiState()
+    )
+
+    fun updateConnectionMode(mode: String) {
+        viewModelScope.launch { preferences.updateConnectionMode(mode) }
+    }
     fun updateBridgeHost(host: String) {
         viewModelScope.launch { preferences.setBridgeHost(host) }
     }
