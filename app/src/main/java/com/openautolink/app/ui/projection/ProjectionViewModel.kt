@@ -309,13 +309,15 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
             val diagEnabled = preferences.remoteDiagnosticsEnabled.first()
             val diagMinLevel = preferences.remoteDiagnosticsMinLevel.first()
             val scalingMode = preferences.videoScalingMode.first()
+            val connectionMode = preferences.connectionMode.first()
             val network = resolveNetwork(ifaceName)
             val networkResolver = com.openautolink.app.transport.NetworkResolver {
                 resolveNetwork(ifaceName)
             }
             sessionManager.start(host, port, codec, micSrc,
                 diagnosticsEnabled = diagEnabled, diagnosticsMinLevel = diagMinLevel,
-                network = network, networkResolver = networkResolver, scalingMode = scalingMode)
+                network = network, networkResolver = networkResolver, scalingMode = scalingMode,
+                connectionMode = connectionMode)
         }
     }
 

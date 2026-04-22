@@ -91,6 +91,10 @@ class SessionManager(
 
     private val connectionManager = ConnectionManager(scope)
 
+    // Direct mode session — speaks AA wire protocol directly to phone
+    private var directSession: com.openautolink.app.transport.direct.DirectAaSession? = null
+    private var activeConnectionMode = "bridge"
+
     // Dedicated single-threaded dispatcher for video decode — keeps frame ordering
     // and prevents blocking the main thread with MediaCodec input queueing.
     private val videoDispatcher = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
@@ -229,7 +233,7 @@ class SessionManager(
     fun start(host: String, port: Int = 5288, codecPreference: String = "h264", micSourcePreference: String = "car",
                diagnosticsEnabled: Boolean = false, diagnosticsMinLevel: String = "INFO",
                network: Network? = null, networkResolver: NetworkResolver? = null,
-               scalingMode: String = "letterbox") {
+               scalingMode: String = "letterbox", connectionMode: String = "bridge") {
         targetHost = host
         micSource = micSourcePreference
         observeJob?.cancel()
@@ -417,9 +421,65 @@ class SessionManager(
                 watchCallState()
             }
 
-            // Start connection
-            connectionManager.connect(host, port, network = network, networkResolver = networkResolver)
+            // Start connection based on mode
+            activeConnectionMode = connectionMode
+            if (connectionMode == "direct") {
+                startDirectMode()
+            } else {
+                connectionManager.connect(host, port, network = network, networkResolver = networkResolver)
+            }
         }
+    }
+
+    private fun startDirectMode() {
+        directSession?.stop()
+        val ctx = context ?: return
+        val session = com.openautolink.app.transport.direct.DirectAaSession(scope, ctx)
+        session.videoConfig = com.openautolink.app.transport.direct.DirectServiceDiscovery.VideoConfig(
+            width = 1920, height = 1080, fps = 60, dpi = 160,
+            codec = if (_videoDecoder is MediaCodecDecoder) "H.264" else "H.264",
+        )
+        directSession = session
+
+        // Observe direct session flows — same pattern as bridge mode
+        scope.launch {
+            session.connectionState.collect { connState ->
+                val newState = connState.toSessionState()
+                _sessionState.value = newState
+                _statusMessage.value = when (newState) {
+                    SessionState.IDLE -> "Waiting for phone..."
+                    SessionState.CONNECTING -> "Phone connecting..."
+                    SessionState.BRIDGE_CONNECTED -> "Handshake..."
+                    SessionState.PHONE_CONNECTED -> "Phone connected"
+                    SessionState.STREAMING -> "Streaming"
+                    SessionState.ERROR -> "Error"
+                }
+                if (newState == SessionState.STREAMING) {
+                    _gnssForwarder?.start()
+                    _vehicleDataForwarder?.start()
+                    _imuForwarder?.start()
+                }
+            }
+        }
+        scope.launch {
+            session.controlMessages.collect { message ->
+                lastActiveTimestamp = SystemClock.elapsedRealtime()
+                handleControlMessage(message)
+            }
+        }
+        scope.launch(videoDispatcher) {
+            session.videoFrames.collect { frame ->
+                _videoDecoder?.onFrame(frame)
+            }
+        }
+        scope.launch(audioDispatcher) {
+            session.audioFrames.collect { frame ->
+                _audioPlayer?.onAudioFrame(frame)
+            }
+        }
+
+        session.start()
+        Log.i(TAG, "Direct mode started — listening on port 5288")
     }
 
     fun stop() {
@@ -435,6 +495,9 @@ class SessionManager(
         keyframeWatchJob = null
         callStateJob?.cancel()
         callStateJob = null
+        // Stop direct session if active
+        directSession?.stop()
+        directSession = null
         scope.launch {
             connectionManager.disconnectAudio()
             connectionManager.disconnectVideo()

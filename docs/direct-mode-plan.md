@@ -153,7 +153,9 @@ New package: `app/src/main/java/com/openautolink/app/transport/direct/`
 - [x] Mic channel → capture start signal (structure ready)
 
 #### 1d. Integration (~2 days)
-- [ ] `SessionManager` — add `DirectAaSession` as alternative to `BridgeSession`
+- [x] `SessionManager` — add `DirectAaSession` as alternative to `BridgeSession`
+- [x] `AppPreferences` — `connectionMode` preference ("bridge" / "direct"), default "direct"
+- [x] `ProjectionViewModel` — reads `connectionMode` and passes to `SessionManager.start()`
 - [ ] Settings UI — "Connection Mode" picker (Bridge / Direct)
 - [ ] Reconnection logic — when phone hotspot drops, show "Connecting..." and retry
 - [ ] End-to-end test on car

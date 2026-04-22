@@ -55,6 +55,7 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
         val AA_HEIGHT_MARGIN = intPreferencesKey("aa_height_margin")
         val AA_PIXEL_ASPECT = intPreferencesKey("aa_pixel_aspect")
         val VIDEO_SCALING_MODE = stringPreferencesKey("video_scaling_mode")
+        val CONNECTION_MODE = stringPreferencesKey("connection_mode")
         val PHONE_MODE = stringPreferencesKey("phone_mode")
         val WIFI_BAND = stringPreferencesKey("wifi_band")
         val WIFI_COUNTRY = stringPreferencesKey("wifi_country")
@@ -111,6 +112,7 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
         const val DEFAULT_AA_HEIGHT_MARGIN = 0 // 0 = auto from display AR
         const val DEFAULT_AA_PIXEL_ASPECT = 0 // 0 = default (square pixels, 10000)
         const val DEFAULT_VIDEO_SCALING_MODE = "crop" // "letterbox" or "crop"
+        const val DEFAULT_CONNECTION_MODE = "direct" // "bridge" or "direct"
         const val DEFAULT_PHONE_MODE = "wireless"
         const val DEFAULT_WIFI_BAND = "5ghz"
         const val DEFAULT_WIFI_COUNTRY = "US"
@@ -226,6 +228,10 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
 
     val videoScalingMode: Flow<String> = dataStore.data.map { prefs ->
         prefs[VIDEO_SCALING_MODE] ?: DEFAULT_VIDEO_SCALING_MODE
+    }
+
+    val connectionMode: Flow<String> = dataStore.data.map { prefs ->
+        prefs[CONNECTION_MODE] ?: DEFAULT_CONNECTION_MODE
     }
 
     val phoneMode: Flow<String> = dataStore.data.map { prefs ->
