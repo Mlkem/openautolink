@@ -154,20 +154,27 @@ class DirectAaSession(
         val out = outputStream ?: return@withContext
         try {
             if (sslActive) {
-                // Encrypt the full message (header + type + payload) before sending
-                val raw = ByteArray(msg.wireSize)
-                raw[0] = msg.channel.toByte()
-                raw[1] = msg.flags.toByte()
-                val length = AaMessage.TYPE_SIZE + msg.payloadLength
-                raw[2] = (length shr 8).toByte()
-                raw[3] = (length and 0xFF).toByte()
-                raw[4] = (msg.type shr 8).toByte()
-                raw[5] = (msg.type and 0xFF).toByte()
+                // AA post-handshake: 4-byte header is NOT encrypted,
+                // only the body (type + payload) is encrypted.
+                val bodyLen = AaMessage.TYPE_SIZE + msg.payloadLength
+                val plainBody = ByteArray(bodyLen)
+                plainBody[0] = (msg.type shr 8).toByte()
+                plainBody[1] = (msg.type and 0xFF).toByte()
                 if (msg.payloadLength > 0) {
-                    System.arraycopy(msg.payload, msg.payloadOffset, raw, 6, msg.payloadLength)
+                    System.arraycopy(msg.payload, msg.payloadOffset, plainBody, 2, msg.payloadLength)
                 }
-                val encrypted = sslEngine.encrypt(raw) ?: return@withContext
-                synchronized(out) { out.write(encrypted); out.flush() }
+                val encBody = sslEngine.encrypt(plainBody) ?: return@withContext
+                // Write 4-byte header with encrypted body length
+                val header = ByteArray(4)
+                header[0] = msg.channel.toByte()
+                header[1] = msg.flags.toByte()
+                header[2] = (encBody.size shr 8).toByte()
+                header[3] = (encBody.size and 0xFF).toByte()
+                synchronized(out) {
+                    out.write(header)
+                    out.write(encBody)
+                    out.flush()
+                }
             } else {
                 synchronized(out) { codec.encode(msg, out) }
             }
@@ -238,46 +245,64 @@ class DirectAaSession(
         val input = inputStream ?: return
 
         while (true) {
-            // Read encrypted data and decrypt
-            // In SSL mode, we read raw bytes from the socket, decrypt, then parse AA messages
+            // Step 1: Read 4-byte AA header (NOT encrypted)
             val rawHeader = ByteArray(4)
-            var offset = 0
-            while (offset < 4) {
-                val n = input.read(rawHeader, offset, 4 - offset)
-                if (n < 0) {
-                    OalLog.i(TAG, "Phone disconnected (EOF)")
-                    return
-                }
-                offset += n
-            }
-
-            // Decrypt if SSL is active
-            // TODO: The SSL layer wraps TLS records around the AA messages.
-            // For now, read the TLS record, decrypt, then parse the AA message from the plaintext.
-            // This needs refinement â€” HURev's approach reads full TLS records first.
-
-            val channel = rawHeader[0].toInt() and 0xFF
-            val flags = rawHeader[1].toInt() and 0xFF
-            val length = ((rawHeader[2].toInt() and 0xFF) shl 8) or (rawHeader[3].toInt() and 0xFF)
-
-            if (length < 2 || length > 65535) {
-                OalLog.e(TAG, "Invalid message length: $length")
+            if (readFully(input, rawHeader, 4) < 0) {
+                OalLog.i(TAG, "Phone disconnected (EOF)")
                 return
             }
 
-            val body = ByteArray(length)
-            offset = 0
-            while (offset < length) {
-                val n = input.read(body, offset, length - offset)
-                if (n < 0) return
-                offset += n
+
+            val channel = rawHeader[0].toInt() and 0xFF
+            val flags = rawHeader[1].toInt() and 0xFF
+            val encLen = ((rawHeader[2].toInt() and 0xFF) shl 8) or (rawHeader[3].toInt() and 0xFF)
+
+            if (encLen < 0 || encLen > 4 * 1024 * 1024) {
+                OalLog.e(TAG, "Invalid enc_len: $encLen on ${AaChannel.name(channel)}")
+                return
             }
 
-            val type = ((body[0].toInt() and 0xFF) shl 8) or (body[1].toInt() and 0xFF)
-            val msg = AaMessage(channel, flags, type, body, 2, length - 2)
+            // For fragmented video (flag 0x09), consume 4-byte total-size prefix
+            if (flags == 0x09) {
+                val fragSizeBuf = ByteArray(4)
+                if (readFully(input, fragSizeBuf, 4) < 0) return
+            }
+
+            // Step 2: Read enc_len bytes of encrypted body
+            val encBody = ByteArray(encLen)
+            if (encLen > 0 && readFully(input, encBody, encLen) < 0) {
+                OalLog.i(TAG, "Phone disconnected during body read")
+                return
+            }
+
+            // Step 3: Decrypt if SSL is active
+            val plainBody: ByteArray = if (sslActive && encLen > 0) {
+                sslEngine.decrypt(encBody) ?: run {
+                    OalLog.e(TAG, "SSL decrypt failed on ${AaChannel.name(channel)}")
+                    return
+                }
+            } else {
+                encBody
+            }
+
+            if (plainBody.size < 2) continue
+
+            // Step 4: Parse type + payload from decrypted plaintext
+            val type = ((plainBody[0].toInt() and 0xFF) shl 8) or (plainBody[1].toInt() and 0xFF)
+            val msg = AaMessage(channel, flags, type, plainBody, 2, plainBody.size - 2)
 
             handleMessage(msg)
         }
+    }
+
+    private fun readFully(input: InputStream, buf: ByteArray, length: Int): Int {
+        var offset = 0
+        while (offset < length) {
+            val n = input.read(buf, offset, length - offset)
+            if (n < 0) return -1
+            offset += n
+        }
+        return offset
     }
 
     // â”€â”€ Message dispatch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
