@@ -139,7 +139,7 @@ fun DiagnosticsScreen(
               Box(modifier = Modifier.widthIn(max = 720.dp)) {
                 when (selectedTab) {
                     DiagnosticsTab.SYSTEM -> SystemTab(uiState.system)
-                    DiagnosticsTab.NETWORK -> NetworkTab(uiState.network)
+                    DiagnosticsTab.NETWORK -> NetworkTab(uiState.network, uiState.networkProbe, viewModel)
                     DiagnosticsTab.BRIDGE -> BridgeTab(uiState.bridge)
                     DiagnosticsTab.CAR -> CarTab(uiState.car)
                     DiagnosticsTab.LOGS -> LogsTab(uiState.logs, uiState.logFilter, viewModel)
@@ -234,7 +234,7 @@ private fun SystemTab(info: SystemInfo) {
 // --- Network Tab ---
 
 @Composable
-private fun NetworkTab(info: NetworkInfo) {
+private fun NetworkTab(info: NetworkInfo, probe: NetworkProbeState, viewModel: DiagnosticsViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -250,6 +250,110 @@ private fun NetworkTab(info: NetworkInfo) {
         DiagRow("Control (5288)", info.controlState, valueColor = channelStateColor(info.controlState))
         DiagRow("Video (5290)", info.videoState, valueColor = channelStateColor(info.videoState))
         DiagRow("Audio (5289)", info.audioState, valueColor = channelStateColor(info.audioState))
+
+        Spacer(modifier = Modifier.height(24.dp))
+        SectionHeader("Network Probe")
+
+        // Show all network interfaces
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Interfaces", color = Color.Gray, fontSize = 13.sp, modifier = Modifier.width(100.dp))
+            androidx.compose.material3.FilledTonalButton(
+                onClick = { viewModel.refreshInterfaces() },
+                modifier = Modifier.height(32.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
+            ) {
+                Text("Refresh", fontSize = 12.sp)
+            }
+        }
+        if (probe.interfaces.isEmpty()) {
+            DiagRow("", "No interfaces found")
+        } else {
+            for (iface in probe.interfaces) {
+                DiagRow("  ${iface.name}", iface.ip, valueColor = Color(0xFF4CAF50))
+            }
+        }
+
+        // Ping test
+        Spacer(modifier = Modifier.height(16.dp))
+        SectionHeader("Ping Test")
+        var pingInput by remember { mutableStateOf(probe.pingTarget) }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            androidx.compose.material3.OutlinedTextField(
+                value = pingInput,
+                onValueChange = { pingInput = it; viewModel.setPingTarget(it) },
+                label = { Text("Target IP", fontSize = 12.sp) },
+                singleLine = true,
+                modifier = Modifier.weight(1f).height(56.dp),
+                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, color = Color.White),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            androidx.compose.material3.FilledTonalButton(
+                onClick = { viewModel.setPingTarget(pingInput); viewModel.runPing() },
+                enabled = !probe.pingInProgress && pingInput.isNotBlank(),
+                modifier = Modifier.height(40.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
+            ) {
+                Text(if (probe.pingInProgress) "..." else "Ping", fontSize = 12.sp)
+            }
+            Spacer(modifier = Modifier.width(4.dp))
+            androidx.compose.material3.FilledTonalButton(
+                onClick = { viewModel.setPingTarget(pingInput); viewModel.runTcpConnect(pingInput) },
+                enabled = !probe.pingInProgress && pingInput.isNotBlank(),
+                modifier = Modifier.height(40.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
+            ) {
+                Text(if (probe.pingInProgress) "..." else "TCP", fontSize = 12.sp)
+            }
+        }
+        if (probe.pingResult != null) {
+            val color = if (probe.pingResult.startsWith("✓")) Color(0xFF4CAF50) else Color(0xFFFF5722)
+            DiagRow("Result", probe.pingResult, valueColor = color)
+        }
+
+        // TCP Listener
+        Spacer(modifier = Modifier.height(16.dp))
+        SectionHeader("TCP Listener (port ${probe.tcpListenerPort})")
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (probe.tcpListenerActive) "Listening..." else "Stopped",
+                color = if (probe.tcpListenerActive) Color(0xFF4CAF50) else Color.Gray,
+                fontSize = 13.sp,
+                modifier = Modifier.weight(1f),
+            )
+            androidx.compose.material3.FilledTonalButton(
+                onClick = { viewModel.toggleTcpListener() },
+                modifier = Modifier.height(36.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+            ) {
+                Text(
+                    if (probe.tcpListenerActive) "Stop" else "Start Listener",
+                    fontSize = 12.sp,
+                )
+            }
+        }
+        for (log in probe.tcpListenerLog) {
+            val color = when {
+                log.startsWith("✓") -> Color(0xFF4CAF50)
+                log.startsWith("✗") -> Color(0xFFFF5722)
+                else -> Color(0xFFB0BEC5)
+            }
+            Text(
+                log,
+                color = color,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 1.dp),
+            )
+        }
     }
 }
 

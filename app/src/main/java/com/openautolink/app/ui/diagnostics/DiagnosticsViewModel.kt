@@ -17,6 +17,7 @@ import com.openautolink.app.transport.ControlMessage
 import com.openautolink.app.video.CodecSelector
 import com.openautolink.app.video.VideoStats
 import com.openautolink.app.audio.AudioStats
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +29,12 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.net.Inet4Address
+import java.net.InetSocketAddress
+import java.net.NetworkInterface
+import java.net.ServerSocket
+import java.net.Socket
 
 data class CodecInfo(
     val name: String,
@@ -134,6 +141,19 @@ data class DiagnosticsUiState(
     val car: CarInfo = CarInfo(),
     val logs: List<LogEntry> = emptyList(),
     val logFilter: LogSeverity = LogSeverity.DEBUG,
+    val networkProbe: NetworkProbeState = NetworkProbeState(),
+)
+
+data class InterfaceInfo(val name: String, val ip: String)
+
+data class NetworkProbeState(
+    val interfaces: List<InterfaceInfo> = emptyList(),
+    val pingTarget: String = "",
+    val pingResult: String? = null,
+    val pingInProgress: Boolean = false,
+    val tcpListenerActive: Boolean = false,
+    val tcpListenerPort: Int = 5288,
+    val tcpListenerLog: List<String> = emptyList(),
 )
 
 class DiagnosticsViewModel(application: Application) : AndroidViewModel(application) {
@@ -152,6 +172,9 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
     private val _bridge = MutableStateFlow(DiagnosticsUiState().bridge)
     private val _car = MutableStateFlow(CarInfo())
     private val _logFilter = MutableStateFlow(LogSeverity.DEBUG)
+    private val _networkProbe = MutableStateFlow(NetworkProbeState())
+    private var tcpListenerJob: Job? = null
+    private var tcpServerSocket: ServerSocket? = null
 
     val uiState: StateFlow<DiagnosticsUiState> = combine(
         _system,
@@ -161,8 +184,9 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
         combine(
             com.openautolink.app.diagnostics.DiagnosticLog.localLogs,
             _logFilter,
-        ) { logs, filter -> logs to filter },
-    ) { system, network, bridge, car, (localEntries, filter) ->
+            _networkProbe,
+        ) { logs, filter, probe -> Triple(logs, filter, probe) },
+    ) { system, network, bridge, car, (localEntries, filter, probe) ->
         // Map LocalLogEntry → LogEntry for UI
         val logs = localEntries.map { entry ->
             LogEntry(
@@ -186,6 +210,7 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
             car = car,
             logs = filtered,
             logFilter = filter,
+            networkProbe = probe,
         )
     }.stateIn(
         viewModelScope,
@@ -335,7 +360,134 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
         }
 
         com.openautolink.app.diagnostics.DiagnosticLog.i("Diagnostics", "Diagnostics screen opened")
+
+        // Populate network interfaces on open
+        refreshInterfaces()
     }
+
+    // ── Network Probe ─────────────────────────────────────────────────
+
+    fun refreshInterfaces() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val ifaces = mutableListOf<InterfaceInfo>()
+            try {
+                for (ni in NetworkInterface.getNetworkInterfaces()) {
+                    for (addr in ni.inetAddresses) {
+                        if (!addr.isLoopbackAddress && addr is Inet4Address) {
+                            ifaces.add(InterfaceInfo(ni.name, addr.hostAddress ?: "?"))
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+            _networkProbe.value = _networkProbe.value.copy(interfaces = ifaces)
+        }
+    }
+
+    fun setPingTarget(target: String) {
+        _networkProbe.value = _networkProbe.value.copy(pingTarget = target)
+    }
+
+    fun runPing() {
+        val target = _networkProbe.value.pingTarget.trim()
+        if (target.isEmpty()) return
+        _networkProbe.value = _networkProbe.value.copy(pingInProgress = true, pingResult = null)
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = try {
+                val addr = java.net.InetAddress.getByName(target)
+                val start = System.currentTimeMillis()
+                val reachable = addr.isReachable(3000)
+                val elapsed = System.currentTimeMillis() - start
+                if (reachable) "✓ Reachable in ${elapsed}ms" else "✗ Unreachable (3s timeout)"
+            } catch (e: Exception) {
+                "✗ Error: ${e.message}"
+            }
+            _networkProbe.value = _networkProbe.value.copy(pingInProgress = false, pingResult = result)
+        }
+    }
+
+    fun runTcpConnect(target: String, port: Int = 5288) {
+        _networkProbe.value = _networkProbe.value.copy(pingInProgress = true, pingResult = null)
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = try {
+                val socket = Socket()
+                val start = System.currentTimeMillis()
+                socket.connect(InetSocketAddress(target.trim(), port), 3000)
+                val elapsed = System.currentTimeMillis() - start
+                socket.close()
+                "✓ TCP:$port open in ${elapsed}ms"
+            } catch (e: Exception) {
+                "✗ TCP:$port failed: ${e.message}"
+            }
+            _networkProbe.value = _networkProbe.value.copy(pingInProgress = false, pingResult = result)
+        }
+    }
+
+    fun toggleTcpListener() {
+        if (_networkProbe.value.tcpListenerActive) {
+            stopTcpListener()
+        } else {
+            startTcpListener()
+        }
+    }
+
+    private fun startTcpListener() {
+        val port = _networkProbe.value.tcpListenerPort
+        _networkProbe.value = _networkProbe.value.copy(
+            tcpListenerActive = true,
+            tcpListenerLog = listOf("Starting listener on port $port...")
+        )
+        tcpListenerJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val server = ServerSocket(port).apply { reuseAddress = true; soTimeout = 0 }
+                tcpServerSocket = server
+                addTcpLog("Listening on port $port — connect from phone to test")
+                while (true) {
+                    val client = server.accept()
+                    val remote = client.inetAddress?.hostAddress ?: "unknown"
+                    addTcpLog("✓ Connection from $remote")
+                    // Read a few bytes to confirm data flow
+                    try {
+                        client.soTimeout = 2000
+                        val buf = ByteArray(256)
+                        val n = client.getInputStream().read(buf)
+                        if (n > 0) {
+                            addTcpLog("  Received $n bytes from $remote")
+                        } else {
+                            addTcpLog("  Connection closed by $remote (no data)")
+                        }
+                    } catch (_: Exception) {
+                        addTcpLog("  No data within 2s (connect-only test OK)")
+                    } finally {
+                        client.close()
+                    }
+                }
+            } catch (e: Exception) {
+                if (_networkProbe.value.tcpListenerActive) {
+                    addTcpLog("✗ Listener error: ${e.message}")
+                }
+            } finally {
+                _networkProbe.value = _networkProbe.value.copy(tcpListenerActive = false)
+            }
+        }
+    }
+
+    private fun stopTcpListener() {
+        tcpListenerJob?.cancel()
+        tcpListenerJob = null
+        try { tcpServerSocket?.close() } catch (_: Exception) {}
+        tcpServerSocket = null
+        addTcpLog("Listener stopped")
+        _networkProbe.value = _networkProbe.value.copy(tcpListenerActive = false)
+    }
+
+    private fun addTcpLog(msg: String) {
+        val current = _networkProbe.value.tcpListenerLog
+        _networkProbe.value = _networkProbe.value.copy(
+            tcpListenerLog = (current + msg).takeLast(20)
+        )
+    }
+
+    // ── Log Filter ──────────────────────────────────────────────────
 
     fun setLogFilter(severity: LogSeverity) {
         _logFilter.value = severity
@@ -347,6 +499,7 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
 
     override fun onCleared() {
         super.onCleared()
+        stopTcpListener()
         diagnosticVehicleForwarder?.stop()
         diagnosticVehicleForwarder = null
         com.openautolink.app.diagnostics.DiagnosticLog.stopLocalCapture()
