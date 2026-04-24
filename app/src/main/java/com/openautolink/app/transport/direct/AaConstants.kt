@@ -66,18 +66,21 @@ object AaMsgType {
     const val AUDIO_FOCUS_REQUEST = 18
     const val AUDIO_FOCUS_NOTIFICATION = 19
 
-    // Media channels (from media.proto MsgType)
-    const val MEDIA_DATA = 0x8000
-    const val MEDIA_CODEC_CONFIG = 0x8001
-    const val MEDIA_SETUP = 0x8002
-    const val MEDIA_START = 0x8003
-    const val MEDIA_STOP = 0x8004
-    const val MEDIA_CONFIG = 0x8005
-    const val MEDIA_ACK = 0x8006
-    const val MIC_REQUEST = 0x8007
-    const val MIC_RESPONSE = 0x8008
-    const val VIDEO_FOCUS_REQUEST = 0x8009
-    const val VIDEO_FOCUS_NOTIFICATION = 0x800A
+    // Media channels (from HUR media.proto MsgType — verified against aasdk)
+    const val MEDIA_DATA = 0x0000          // Video/audio frame payload
+    const val MEDIA_CODEC_CONFIG = 0x0001  // SPS/PPS codec config
+    const val MEDIA_SETUP = 0x8000         // Phone→HU: media channel setup request
+    const val MEDIA_START = 0x8001         // Phone→HU: media streaming start
+    const val MEDIA_STOP = 0x8002          // Phone→HU: media streaming stop
+    const val MEDIA_CONFIG = 0x8003        // HU→Phone: config response (maxUnacked, etc)
+    const val MEDIA_ACK = 0x8004           // HU→Phone: frame acknowledgement
+    const val MIC_REQUEST = 0x8005         // Phone→HU: start/stop mic capture
+    const val MIC_RESPONSE = 0x8006        // HU→Phone: mic response
+    const val VIDEO_FOCUS_REQUEST = 0x8007 // Phone→HU: video focus mode change
+    const val VIDEO_FOCUS_NOTIFICATION = 0x8008 // HU→Phone: grant/deny video focus
+    const val UPDATE_UI_CONFIG_REQUEST = 0x8009 // Phone→HU: UI config update
+    const val UPDATE_UI_CONFIG_REPLY = 0x800A   // HU→Phone: UI config reply
+    const val AUDIO_UNDERFLOW = 0x800B          // HU→Phone: audio underflow notification
 
     /** True if the type is a control-range message (1-26 or special values). */
     fun isControl(type: Int): Boolean = type in 1..26

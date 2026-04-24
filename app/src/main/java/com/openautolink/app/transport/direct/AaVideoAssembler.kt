@@ -1,6 +1,7 @@
 package com.openautolink.app.transport.direct
 
 import com.openautolink.app.diagnostics.OalLog
+import com.openautolink.app.video.NalParser
 import com.openautolink.app.video.VideoFrame
 import java.nio.ByteBuffer
 
@@ -89,7 +90,8 @@ class AaVideoAssembler(
                 val frameData = ByteArray(frameSize)
                 messageBuffer.get(frameData)
                 messageBuffer.clear()
-                VideoFrame(width = 0, height = 0, ptsMs = System.currentTimeMillis(), flags = 0, data = frameData)
+                val frameFlags = if (NalParser.containsIdr(frameData)) VideoFrame.FLAG_KEYFRAME else 0
+                VideoFrame(width = 0, height = 0, ptsMs = System.currentTimeMillis(), flags = frameFlags, data = frameData)
             }
 
             else -> {
@@ -101,15 +103,20 @@ class AaVideoAssembler(
 
     /**
      * Find the NAL start code offset within the payload.
-     * AA prepends either a 10-byte timestamp indication or a 2-byte media indication.
+     * After the 2-byte message type is stripped by the readLoop, the payload is:
+     *   [8B timestamp (uint64)] [NAL data with 00 00 00 01 start code]
+     * Some phones may use a 10-byte prefix or 2-byte media indication instead.
      */
     private fun findNalOffset(data: ByteArray, offset: Int, length: Int): Int {
-        // Check for start code at offset 10 (timestamp indication)
-        if (length > 14 && hasStartCode(data, offset + 10)) return 10
-        // Check for start code at offset 2 (media indication)
-        if (length > 6 && hasStartCode(data, offset + 2)) return 2
-        // Check for start code at offset 0 (raw)
-        if (length > 4 && hasStartCode(data, offset)) return 0
+        // Check common offsets in order of likelihood
+        if (length > 12 && hasStartCode(data, offset + 8)) return 8   // 8-byte timestamp (standard)
+        if (length > 14 && hasStartCode(data, offset + 10)) return 10 // 10-byte timestamp (some phones)
+        if (length > 6 && hasStartCode(data, offset + 2)) return 2    // 2-byte media indication
+        if (length > 4 && hasStartCode(data, offset)) return 0        // raw NAL (no prefix)
+        // Scan first 16 bytes as fallback
+        for (i in 1..minOf(16, length - 4)) {
+            if (i != 2 && i != 8 && i != 10 && hasStartCode(data, offset + i)) return i
+        }
         return -1
     }
 
@@ -130,7 +137,12 @@ class AaVideoAssembler(
         }
         val start = offset + nalOffset
         val frameLength = length - nalOffset
-        return VideoFrame(width = 0, height = 0, ptsMs = System.currentTimeMillis(), flags = 0, data = data.copyOfRange(start, start + frameLength))
+        val frameData = data.copyOfRange(start, start + frameLength)
+        // Detect IDR keyframes from NAL type so the decoder knows to start rendering
+        val isIdr = NalParser.containsIdr(frameData)
+        val flags = if (isIdr) VideoFrame.FLAG_KEYFRAME else 0
+        if (isIdr) OalLog.i(TAG, "IDR keyframe detected (${frameLength}B)")
+        return VideoFrame(width = 0, height = 0, ptsMs = System.currentTimeMillis(), flags = flags, data = frameData)
     }
 
     private fun requestKeyframe() {

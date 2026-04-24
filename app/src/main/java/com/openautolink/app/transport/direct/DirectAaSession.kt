@@ -61,7 +61,7 @@ class DirectAaSession(
     val controlMessages: Flow<ControlMessage> = _controlMessages.asSharedFlow()
 
     private val _videoFrames = MutableSharedFlow<VideoFrame>(
-        extraBufferCapacity = 4,
+        extraBufferCapacity = 30,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     val videoFrames: Flow<VideoFrame> = _videoFrames.asSharedFlow()
@@ -95,8 +95,19 @@ class DirectAaSession(
     // Nearby Connections for peer-to-peer transport (no WiFi needed)
     private var nearbyManager: AaNearbyManager? = null
 
+    // WiFi Direct for native mode
+    private var wifiDirectManager: AaWifiDirectManager? = null
+
     // Video config from settings
     var videoConfig = DirectServiceDiscovery.VideoConfig()
+
+    // Vehicle identity from VHAL — set before start()
+    var vehicleIdentity = DirectServiceDiscovery.VehicleIdentity()
+
+    // AA UI hide flags — set before start()
+    var hideClock = true
+    var hideSignal = true
+    var hideBattery = true
 
     /** Hotspot credentials for BT handshake. Set from settings before start(). */
     var hotspotSsid: String
@@ -107,6 +118,9 @@ class DirectAaSession(
         get() = btHandshake.hotspotPassword
         set(value) { btHandshake.hotspotPassword = value }
 
+    /** Transport method: "native", "nearby", or "hotspot" */
+    var directTransport: String = "native"
+
     /**
      * Start listening for incoming phone connections.
      */
@@ -114,31 +128,45 @@ class DirectAaSession(
         if (serverJob?.isActive == true) return
         _connectionState.value = ConnectionState.DISCONNECTED
 
-        // BT RFCOMM handshake disabled for now — advertising the AA UUID
-        // causes the phone to think the car has native AA, interfering with
-        // the existing GM BT connection. Will re-enable after validation.
-        // btHandshake.start()
+        OalLog.i(TAG, "Starting direct mode (transport=$directTransport)")
 
-        // Start Nearby Connections discovery (peer-to-peer, no WiFi needed)
-        nearbyManager?.stop()
-        nearbyManager = AaNearbyManager(context, scope) { nearbySocket ->
-            // Nearby connection established — handle AA session over this socket
-            scope.launch(Dispatchers.IO) {
-                OalLog.i(TAG, "Nearby socket ready — starting AA session")
-                handleConnection(nearbySocket)
-            }
+        // Start BT RFCOMM handshake for native and hotspot modes
+        if (directTransport == "native" || directTransport == "hotspot") {
+            btHandshake.start()
+            OalLog.i(TAG, "BT RFCOMM handshake started")
         }
-        nearbyManager?.start()
+
+        // Start Nearby Connections discovery for nearby mode
+        if (directTransport == "nearby") {
+            nearbyManager?.stop()
+            nearbyManager = AaNearbyManager(context, scope) { nearbySocket ->
+                scope.launch(Dispatchers.IO) {
+                    OalLog.i(TAG, "Nearby socket ready — starting AA session")
+                    handleConnection(nearbySocket)
+                }
+            }
+            nearbyManager?.start()
+        }
+
+        // Start WiFi Direct group for native mode — creates P2P AP,
+        // feeds SSID/PSK to BT handshake manager automatically
+        if (directTransport == "native") {
+            wifiDirectManager?.stop()
+            wifiDirectManager = AaWifiDirectManager(context)
+            wifiDirectManager?.onCredentialsReady = { ssid, psk, ip, bssid ->
+                OalLog.i(TAG, "WiFi Direct ready: SSID=$ssid IP=$ip")
+                btHandshake.hotspotSsid = ssid
+                btHandshake.hotspotPassword = psk
+                // The BT handshake will use these when the phone connects
+            }
+            wifiDirectManager?.start()
+        }
 
         serverJob = scope.launch(Dispatchers.IO) {
             try {
                 serverSocket = ServerSocket(PORT).apply { reuseAddress = true }
                 registerNsd()
                 OalLog.i(TAG, "Listening on port $PORT")
-                _controlMessages.emit(ControlMessage.Hello(
-                    name = "DirectMode", version = 1, capabilities = listOf("direct"),
-                    videoPort = 0, audioPort = 0,
-                ))
 
                 while (true) {
                     _connectionState.value = ConnectionState.DISCONNECTED
@@ -170,6 +198,8 @@ class DirectAaSession(
         btHandshake.stop()
         nearbyManager?.stop()
         nearbyManager = null
+        wifiDirectManager?.stop()
+        wifiDirectManager = null
         try { clientSocket?.close() } catch (_: Exception) {}
         try { serverSocket?.close() } catch (_: Exception) {}
         clientSocket = null
@@ -197,14 +227,17 @@ class DirectAaSession(
                 if (msg.payloadLength > 0) {
                     System.arraycopy(msg.payload, msg.payloadOffset, plainBody, 2, msg.payloadLength)
                 }
-                val encBody = sslEngine.encrypt(plainBody) ?: return@withContext
-                // Write 4-byte header with encrypted body length
-                val header = ByteArray(4)
-                header[0] = msg.channel.toByte()
-                header[1] = msg.flags.toByte()
-                header[2] = (encBody.size shr 8).toByte()
-                header[3] = (encBody.size and 0xFF).toByte()
+                // SSLEngine is NOT thread-safe — encrypt + write must be atomic.
+                // Multiple coroutines send ChannelOpenResponse simultaneously;
+                // without this lock, concurrent encrypt() calls corrupt the
+                // shared netOutBuffer and cause "encrypt error: null".
                 synchronized(out) {
+                    val encBody = sslEngine.encrypt(plainBody) ?: return@withContext
+                    val header = ByteArray(4)
+                    header[0] = msg.channel.toByte()
+                    header[1] = msg.flags.toByte()
+                    header[2] = (encBody.size shr 8).toByte()
+                    header[3] = (encBody.size and 0xFF).toByte()
                     out.write(header)
                     out.write(encBody)
                     out.flush()
@@ -212,6 +245,9 @@ class DirectAaSession(
             } else {
                 synchronized(out) { codec.encode(msg, out) }
             }
+        } catch (e: java.io.IOException) {
+            // Don't spam log for pipe write errors during normal disconnect
+            if (sslActive) OalLog.w(TAG, "Send IO error (pipe may be closing): ${e.message}")
         } catch (e: Exception) {
             OalLog.e(TAG, "Send error: ${e.message}")
         }
@@ -242,12 +278,14 @@ class DirectAaSession(
                 _controlMessages.emit(ControlMessage.Error(7, "SSL handshake failed"))
                 return
             }
-            sslActive = true
             OalLog.i(TAG, "SSL handshake complete")
 
-            // 3. Send AUTH_COMPLETE
-            sendMessage(AaMessage.raw(AaChannel.CONTROL, AaMsgType.AUTH_COMPLETE,
-                byteArrayOf(0x08, 0x00))) // status = OK
+            // 3. Send AUTH_COMPLETE — must be PLAIN (before sslActive),
+            //    matching aasdk/HURev behavior. This is the transition signal.
+            val authComplete = AaMessage(AaChannel.CONTROL, 0x03,
+                AaMsgType.AUTH_COMPLETE, byteArrayOf(0x08, 0x00))
+            codec.encode(authComplete, outputStream!!)
+            sslActive = true
 
             // 4. Wait for ServiceDiscoveryRequest, respond with our capabilities
             _connectionState.value = ConnectionState.CONNECTED
@@ -320,11 +358,26 @@ class DirectAaSession(
                 encBody
             }
 
-            if (plainBody.size < 2) continue
+            if (plainBody.size < 2) {
+                OalLog.w(TAG, "Skipping tiny message on ${AaChannel.name(channel)}: ${plainBody.size}B")
+                continue
+            }
 
             // Step 4: Parse type + payload from decrypted plaintext
-            val type = ((plainBody[0].toInt() and 0xFF) shl 8) or (plainBody[1].toInt() and 0xFF)
-            val msg = AaMessage(channel, flags, type, plainBody, 2, plainBody.size - 2)
+            // CRITICAL: Only FIRST (0x09) and BULK (0x0b) frames have a 2-byte message type prefix.
+            // MIDDLE (0x08) and LAST (0x0a) frames are continuation data with NO type prefix.
+            // The frame type bits: bit 0 = FIRST, bit 1 = LAST, bit 2 = CONTROL, bit 3 = ENCRYPTED
+            val isFirstOrBulk = (flags and 0x01) != 0  // FIRST bit set = FIRST or BULK frame
+            val type: Int
+            val msg: AaMessage
+            if (isFirstOrBulk) {
+                type = ((plainBody[0].toInt() and 0xFF) shl 8) or (plainBody[1].toInt() and 0xFF)
+                msg = AaMessage(channel, flags, type, plainBody, 2, plainBody.size - 2)
+            } else {
+                // MIDDLE/LAST continuation — no type prefix, use type 0 (DATA) as convention
+                type = 0
+                msg = AaMessage(channel, flags, type, plainBody, 0, plainBody.size)
+            }
 
             handleMessage(msg)
         }
@@ -363,17 +416,21 @@ class DirectAaSession(
         when (msg.type) {
             AaMsgType.SERVICE_DISCOVERY_REQUEST -> {
                 OalLog.i(TAG, "ServiceDiscoveryRequest received")
-                val response = DirectServiceDiscovery.build(videoConfig)
+                val response = DirectServiceDiscovery.build(
+                    videoConfig, vehicleIdentity,
+                    hideClock = hideClock, hideSignal = hideSignal, hideBattery = hideBattery,
+                )
                 sendMessage(AaMessage.fromProto(AaChannel.CONTROL, AaMsgType.SERVICE_DISCOVERY_RESPONSE, response))
                 OalLog.i(TAG, "ServiceDiscoveryResponse sent (${response.servicesCount} services)")
             }
 
             AaMsgType.PING_REQUEST -> {
-                // Respond to ping with same timestamp
-                val payload = if (msg.payloadLength > 0) {
-                    msg.payload.copyOfRange(msg.payloadOffset, msg.payloadOffset + msg.payloadLength)
-                } else ByteArray(0)
-                sendMessage(AaMessage.raw(AaChannel.CONTROL, AaMsgType.PING_RESPONSE, payload))
+                // Respond with PingResponse protobuf
+                val response = Control.PingResponse.newBuilder()
+                    .setTimestamp(System.nanoTime())
+                    .build()
+                sendMessage(AaMessage.fromProto(AaChannel.CONTROL, AaMsgType.PING_RESPONSE, response))
+                OalLog.d(TAG, "Ping response sent")
             }
 
             AaMsgType.BYEBYE_REQUEST -> {
@@ -383,13 +440,15 @@ class DirectAaSession(
             }
 
             AaMsgType.AUDIO_FOCUS_REQUEST -> {
-                // Parse the request to determine what type of focus is being requested
+                // Parse but don't log every request — they flood rapidly
                 try {
                     val data = msg.payload.copyOfRange(msg.payloadOffset, msg.payloadOffset + msg.payloadLength)
                     val request = Control.AudioFocusRequestNotification.parseFrom(data)
-                    OalLog.d(TAG, "AudioFocusRequest: type=${request.request}")
+                    // Only log non-RELEASE requests to reduce noise
+                    if (request.request != Control.AudioFocusRequestNotification.AudioFocusRequestType.RELEASE) {
+                        OalLog.d(TAG, "AudioFocusRequest: type=${request.request}")
+                    }
                 } catch (_: Exception) {}
-                // Always grant focus — the car has its own audio focus management via CarAudioManager
                 val notification = Control.AudioFocusNotification.newBuilder()
                     .setFocusState(Control.AudioFocusNotification.AudioFocusStateType.STATE_GAIN)
                     .build()
@@ -414,6 +473,10 @@ class DirectAaSession(
                     OalLog.i(TAG, "Voice session notification (unparsed)")
                 }
             }
+
+            else -> {
+                OalLog.d(TAG, "Unhandled control msg type=${msg.type} (${msg.payloadLength}B)")
+            }
         }
     }
 
@@ -427,18 +490,40 @@ class DirectAaSession(
                     .build()
                 sendMessage(AaMessage.fromProto(msg.channel, AaMsgType.CHANNEL_OPEN_RESPONSE, response))
 
-                // If video channel opened, send VideoFocusNotification
+                // Don't send VideoFocusNotification here — wait for MEDIA_SETUP.
+                // HUR sends VideoFocus only after responding to MEDIA_SETUP with Config.
+                // Sending it too early causes the phone to send a tiny probe frame before
+                // the session is properly configured.
                 if (msg.channel == AaChannel.VIDEO) {
-                    sendVideoFocusNotification()
                     _controlMessages.emit(ControlMessage.PhoneConnected("phone", "wireless"))
                 }
             }
 
             AaMsgType.MEDIA_SETUP -> {
-                // Media setup â€” respond with config
                 OalLog.i(TAG, "MediaSetup on ${AaChannel.name(msg.channel)}")
-                val configResponse = byteArrayOf(0x08, 0x00) // status = OK
-                sendMessage(AaMessage.raw(msg.channel, AaMsgType.MEDIA_CONFIG, configResponse))
+                // Respond with proper Config protobuf — status=HEADUNIT, maxUnacked=30
+                val configResponse = Media.Config.newBuilder()
+                    .setStatus(Media.Config.ConfigStatus.HEADUNIT)
+                    .setMaxUnacked(MAX_UNACKED)
+                    .addConfigurationIndices(0)
+                    .build()
+                sendMessage(AaMessage.fromProto(msg.channel, AaMsgType.MEDIA_CONFIG, configResponse))
+                OalLog.i(TAG, "MediaConfig sent on ${AaChannel.name(msg.channel)} (maxUnacked=$MAX_UNACKED)")
+
+                // After video setup, send VideoFocusNotification to tell the phone to start streaming
+                if (msg.channel == AaChannel.VIDEO) {
+                    sendVideoFocusNotification()
+                }
+
+                // After audio setup, proactively send AudioFocusNotification (GAIN)
+                // so the phone knows it's safe to start audio immediately
+                if (AaChannel.isAudio(msg.channel)) {
+                    val focusNotification = Control.AudioFocusNotification.newBuilder()
+                        .setFocusState(Control.AudioFocusNotification.AudioFocusStateType.STATE_GAIN)
+                        .setUnsolicited(true)
+                        .build()
+                    sendMessage(AaMessage.fromProto(AaChannel.CONTROL, AaMsgType.AUDIO_FOCUS_NOTIFICATION, focusNotification))
+                }
             }
 
             AaMsgType.MEDIA_START -> {
@@ -485,6 +570,15 @@ class DirectAaSession(
     private suspend fun handleVideo(msg: AaMessage) {
         when (msg.type) {
             AaMsgType.MEDIA_DATA -> {
+                // Log first few video frames for diagnostics
+                val totalFrames = (unackedFrames + 1).toLong()
+                if (totalFrames <= 3) {
+                    val hexPrefix = msg.payload.copyOfRange(
+                        msg.payloadOffset,
+                        minOf(msg.payloadOffset + minOf(msg.payloadLength, 16), msg.payload.size)
+                    ).joinToString(" ") { "%02x".format(it) }
+                    OalLog.i(TAG, "Video MEDIA_DATA #$totalFrames: ${msg.payloadLength}B flags=0x${msg.flags.toString(16)} hex=[$hexPrefix]")
+                }
                 val frame = videoAssembler?.process(msg)
                 if (frame != null) {
                     _videoFrames.emit(frame)
@@ -517,7 +611,10 @@ class DirectAaSession(
                 ))
             }
 
-            else -> handleChannelControl(msg)
+            else -> {
+                OalLog.d(TAG, "Video channel msg type=0x${msg.type.toString(16)} (${msg.payloadLength}B)")
+                handleChannelControl(msg)
+            }
         }
     }
 
@@ -670,11 +767,19 @@ class DirectAaSession(
     }
 
     private suspend fun sendVideoFocusNotification() {
+        // VIDEO_FOCUS_PROJECTED = "show me the phone's projected AA UI — send video"
+        // VIDEO_FOCUS_NATIVE = "I want my own native UI — stop sending video"
         val focus = Media.VideoFocusNotification.newBuilder()
-            .setMode(Media.VideoFocusMode.VIDEO_FOCUS_NATIVE)
+            .setMode(Media.VideoFocusMode.VIDEO_FOCUS_PROJECTED)
             .setUnsolicited(false)
             .build()
         sendMessage(AaMessage.fromProto(AaChannel.VIDEO, AaMsgType.VIDEO_FOCUS_NOTIFICATION, focus))
+        OalLog.i(TAG, "VideoFocusNotification sent (PROJECTED)")
+    }
+
+    /** Request a keyframe (IDR) from the phone by re-sending VideoFocusNotification. */
+    suspend fun requestKeyframe() {
+        sendVideoFocusNotification()
     }
 
     // â”€â”€ NSD (Network Service Discovery) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

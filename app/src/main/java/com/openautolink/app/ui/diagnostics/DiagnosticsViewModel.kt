@@ -9,10 +9,8 @@ import android.view.WindowManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.openautolink.app.data.AppPreferences
-import com.openautolink.app.session.BridgeInfo
 import com.openautolink.app.session.SessionManager
 import com.openautolink.app.session.SessionState
-import com.openautolink.app.transport.ConnectionState
 import com.openautolink.app.transport.ControlMessage
 import com.openautolink.app.video.CodecSelector
 import com.openautolink.app.video.VideoStats
@@ -57,21 +55,10 @@ data class SystemInfo(
 )
 
 data class NetworkInfo(
-    val bridgeHost: String,
-    val bridgePort: Int,
-    val controlState: String,
-    val videoState: String,
-    val audioState: String,
     val sessionState: SessionState,
 )
 
-data class BridgeStats(
-    val bridgeName: String?,
-    val bridgeVersion: Int?,
-    val capabilities: List<String>,
-    val videoFramesSent: Long,
-    val audioFramesSent: Long,
-    val uptimeSeconds: Long,
+data class StreamingStats(
     val videoStats: VideoStats,
     val audioStats: AudioStats,
 )
@@ -129,13 +116,9 @@ data class DiagnosticsUiState(
         h264Decoders = emptyList(), h265Decoders = emptyList(), vp9Decoders = emptyList(),
     ),
     val network: NetworkInfo = NetworkInfo(
-        bridgeHost = "", bridgePort = 0,
-        controlState = "DISCONNECTED", videoState = "DISCONNECTED",
-        audioState = "DISCONNECTED", sessionState = SessionState.IDLE,
+        sessionState = SessionState.IDLE,
     ),
-    val bridge: BridgeStats = BridgeStats(
-        bridgeName = null, bridgeVersion = null, capabilities = emptyList(),
-        videoFramesSent = 0, audioFramesSent = 0, uptimeSeconds = 0,
+    val streaming: StreamingStats = StreamingStats(
         videoStats = VideoStats(), audioStats = AudioStats(),
     ),
     val car: CarInfo = CarInfo(),
@@ -169,7 +152,7 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
 
     private val _system = MutableStateFlow(gatherSystemInfo(application))
     private val _network = MutableStateFlow(DiagnosticsUiState().network)
-    private val _bridge = MutableStateFlow(DiagnosticsUiState().bridge)
+    private val _streaming = MutableStateFlow(DiagnosticsUiState().streaming)
     private val _car = MutableStateFlow(CarInfo())
     private val _logFilter = MutableStateFlow(LogSeverity.DEBUG)
     private val _networkProbe = MutableStateFlow(NetworkProbeState())
@@ -179,14 +162,14 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
     val uiState: StateFlow<DiagnosticsUiState> = combine(
         _system,
         _network,
-        _bridge,
+        _streaming,
         _car,
         combine(
             com.openautolink.app.diagnostics.DiagnosticLog.localLogs,
             _logFilter,
             _networkProbe,
         ) { logs, filter, probe -> Triple(logs, filter, probe) },
-    ) { system, network, bridge, car, (localEntries, filter, probe) ->
+    ) { system, network, streaming, car, (localEntries, filter, probe) ->
         // Map LocalLogEntry → LogEntry for UI
         val logs = localEntries.map { entry ->
             LogEntry(
@@ -206,7 +189,7 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
         DiagnosticsUiState(
             system = system,
             network = network,
-            bridge = bridge,
+            streaming = streaming,
             car = car,
             logs = filtered,
             logFilter = filter,
@@ -224,74 +207,8 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
 
         // Observe session state for network tab
         viewModelScope.launch {
-            combine(
-                sessionManager.sessionState,
-                sessionManager.bridgeInfo,
-                preferences.bridgeHost,
-                preferences.bridgePort,
-            ) { state, info, host, port ->
-                val connState = when (state) {
-                    SessionState.IDLE -> "DISCONNECTED"
-                    SessionState.CONNECTING -> "CONNECTING"
-                    else -> "CONNECTED"
-                }
-                val videoState = when (state) {
-                    SessionState.STREAMING -> "STREAMING"
-                    SessionState.PHONE_CONNECTED -> "CONNECTED"
-                    else -> "DISCONNECTED"
-                }
-                val audioState = when (state) {
-                    SessionState.STREAMING -> "STREAMING"
-                    SessionState.PHONE_CONNECTED -> "CONNECTED"
-                    else -> "DISCONNECTED"
-                }
-                NetworkInfo(
-                    bridgeHost = host,
-                    bridgePort = port,
-                    controlState = connState,
-                    videoState = videoState,
-                    audioState = audioState,
-                    sessionState = state,
-                )
-            }.collect { _network.value = it }
-        }
-
-        // Observe bridge info + stats
-        viewModelScope.launch {
-            sessionManager.bridgeInfo.collect { info ->
-                _bridge.value = _bridge.value.copy(
-                    bridgeName = info?.name,
-                    bridgeVersion = info?.version,
-                    capabilities = info?.capabilities ?: emptyList(),
-                )
-            }
-        }
-
-        // Observe control messages for Stats messages
-        viewModelScope.launch {
-            sessionManager.controlMessages.collect { msg ->
-                when (msg) {
-                    is ControlMessage.Stats -> {
-                        _bridge.value = _bridge.value.copy(
-                            videoFramesSent = msg.videoFramesSent,
-                            audioFramesSent = msg.audioFramesSent,
-                            uptimeSeconds = msg.uptimeSeconds,
-                        )
-                    }
-                    is ControlMessage.Error -> {
-                        com.openautolink.app.diagnostics.DiagnosticLog.e("Bridge", "Error ${msg.code}: ${msg.message}")
-                    }
-                    is ControlMessage.Hello -> {
-                        com.openautolink.app.diagnostics.DiagnosticLog.i("Bridge", "Hello from ${msg.name} v${msg.version}")
-                    }
-                    is ControlMessage.PhoneConnected -> {
-                        com.openautolink.app.diagnostics.DiagnosticLog.i("Session", "Phone connected: ${msg.phoneName}")
-                    }
-                    is ControlMessage.PhoneDisconnected -> {
-                        com.openautolink.app.diagnostics.DiagnosticLog.i("Session", "Phone disconnected: ${msg.reason}")
-                    }
-                    else -> {}
-                }
+            sessionManager.sessionState.collect { state ->
+                _network.value = NetworkInfo(sessionState = state)
             }
         }
 
@@ -301,10 +218,10 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
                 if (state == SessionState.STREAMING) {
                     coroutineScope {
                         sessionManager.videoStats?.let { flow ->
-                            launch { flow.collect { stats -> _bridge.value = _bridge.value.copy(videoStats = stats) } }
+                            launch { flow.collect { stats -> _streaming.value = _streaming.value.copy(videoStats = stats) } }
                         }
                         sessionManager.audioStats?.let { flow ->
-                            launch { flow.collect { stats -> _bridge.value = _bridge.value.copy(audioStats = stats) } }
+                            launch { flow.collect { stats -> _streaming.value = _streaming.value.copy(audioStats = stats) } }
                         }
                     }
                 }

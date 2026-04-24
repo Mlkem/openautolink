@@ -134,7 +134,36 @@ class AaBtHandshakeManager(private val scope: CoroutineScope) {
             }
             OalLog.i(TAG, "Car IP: $carIp")
 
-            // Send WifiStartRequest
+            // Step 1: Wait for phone to send WifiInfoRequest (type 2)
+            // The phone initiates the WiFi credential exchange
+            OalLog.i(TAG, "Waiting for phone's WifiInfoRequest...")
+            val request = readProtobuf(input)
+            OalLog.i(TAG, "Received type ${request.type} (${request.payload.size}B)")
+
+            if (request.type == 1) {
+                // Phone sent WifiStartRequest first (alternative flow)
+                // This happens when the phone already knows the IP from a previous session
+                OalLog.i(TAG, "Phone sent WifiStartRequest first — responding with creds")
+                // Read the next message which should be type 2
+                val request2 = readProtobuf(input)
+                OalLog.i(TAG, "Second message type ${request2.type}")
+            }
+
+            // Step 2: Send WifiInfoResponse (type 3) with credentials
+            val wifiResponse = Wireless.WifiInfoResponse.newBuilder()
+                .setSsid(hotspotSsid)
+                .setKey(hotspotPassword)
+                .setBssid("00:00:00:00:00:00")
+                .setSecurityMode(
+                    if (hotspotPassword.isEmpty()) Wireless.SecurityMode.OPEN
+                    else Wireless.SecurityMode.WPA2_PERSONAL
+                )
+                .setAccessPointType(Wireless.AccessPointType.STATIC)
+                .build()
+            sendProtobuf(output, wifiResponse.toByteArray(), 3)
+            OalLog.i(TAG, "Sent WifiInfoResponse (ssid=$hotspotSsid)")
+
+            // Step 3: Send WifiStartRequest (type 1) with car's IP and port
             val startRequest = Wireless.WifiStartRequest.newBuilder()
                 .setIpAddress(carIp)
                 .setPort(5288)
@@ -143,31 +172,12 @@ class AaBtHandshakeManager(private val scope: CoroutineScope) {
             sendProtobuf(output, startRequest.toByteArray(), 1)
             OalLog.i(TAG, "Sent WifiStartRequest (ip=$carIp, port=5288)")
 
-            // Read response (type 2 = WifiSecurityRequest)
-            val response = readProtobuf(input)
-            OalLog.i(TAG, "Response type ${response.type} (${response.payload.size}B)")
+            // Step 4: Wait for phone's response/status
+            OalLog.i(TAG, "BT handshake complete — waiting for phone to connect TCP")
 
-            if (response.type == 2) {
-                // Send WifiInfoResponse with hotspot creds
-                val wifiResponse = Wireless.WifiInfoResponse.newBuilder()
-                    .setSsid(hotspotSsid)
-                    .setKey(hotspotPassword)
-                    .setBssid("00:00:00:00:00:00")
-                    .setSecurityMode(
-                        if (hotspotPassword.isEmpty()) Wireless.SecurityMode.OPEN
-                        else Wireless.SecurityMode.WPA2_PERSONAL
-                    )
-                    .setAccessPointType(Wireless.AccessPointType.STATIC)
-                    .build()
-                sendProtobuf(output, wifiResponse.toByteArray(), 3)
-                OalLog.i(TAG, "Sent WifiInfoResponse (ssid=$hotspotSsid)")
-
-                // Keep socket alive during WiFi transition
-                while (isRunning && socket.isConnected) {
-                    delay(2000)
-                }
-            } else {
-                OalLog.w(TAG, "Unexpected response type: ${response.type} (expected 2)")
+            // Keep socket alive during WiFi transition
+            while (isRunning && socket.isConnected) {
+                delay(2000)
             }
         } catch (e: CancellationException) {
             throw e
@@ -202,15 +212,37 @@ class AaBtHandshakeManager(private val scope: CoroutineScope) {
 
     private fun findCarIp(): String? {
         try {
+            // Log all interfaces for diagnostics
             for (ni in NetworkInterface.getNetworkInterfaces()) {
-                if (!ni.name.startsWith("wlan")) continue
                 for (addr in ni.inetAddresses) {
                     if (!addr.isLoopbackAddress && addr is Inet4Address) {
+                        OalLog.d(TAG, "Interface ${ni.name}: ${addr.hostAddress}")
+                    }
+                }
+            }
+            // Check p2p interfaces first (WiFi Direct native mode)
+            for (ni in NetworkInterface.getNetworkInterfaces()) {
+                if (!ni.name.contains("p2p")) continue
+                for (addr in ni.inetAddresses) {
+                    if (!addr.isLoopbackAddress && addr is Inet4Address) {
+                        OalLog.i(TAG, "Using P2P IP: ${addr.hostAddress} on ${ni.name}")
                         return addr.hostAddress
                     }
                 }
             }
-        } catch (_: Exception) {}
+            // Then any non-loopback IPv4 (wlan, eth, etc.)
+            for (ni in NetworkInterface.getNetworkInterfaces()) {
+                if (ni.name == "lo") continue
+                for (addr in ni.inetAddresses) {
+                    if (!addr.isLoopbackAddress && addr is Inet4Address) {
+                        OalLog.i(TAG, "Using IP: ${addr.hostAddress} on ${ni.name}")
+                        return addr.hostAddress
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            OalLog.e(TAG, "Error enumerating interfaces: ${e.message}")
+        }
         return null
     }
 

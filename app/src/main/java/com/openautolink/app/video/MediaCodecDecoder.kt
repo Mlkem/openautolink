@@ -263,12 +263,11 @@ class MediaCodecDecoder(
                         return
                     }
                     // Fall through to queue as keyframe below
-                } else if (surface == null && codecConfigData != null) {
-                    // IDR arrived but surface not attached yet — cache it for replay
-                    // when surface becomes available. This happens during Save & Connect
-                    // from Settings where SurfaceView doesn't exist.
-                    Log.i(TAG, "IDR received but no surface — caching for later replay (${frame.data.size} bytes)")
-                    DiagnosticLog.i("video", "IDR cached (no surface): ${frame.data.size} bytes")
+                } else if (codecConfigData != null) {
+                    // IDR arrived but codec not ready yet (still configuring) or
+                    // surface not attached. Cache it for replay when codec/surface is ready.
+                    Log.i(TAG, "IDR received but codec not ready — caching for replay (${frame.data.size} bytes)")
+                    DiagnosticLog.i("video", "IDR cached (codec configuring): ${frame.data.size} bytes")
                     cachedIdrFrame = frame
                     return
                 } else {
@@ -406,11 +405,17 @@ class MediaCodecDecoder(
             val spsDims = if (mimeType == CodecSelector.MIME_H264) {
                 NalParser.parseSpsResolution(configData)
             } else null
-            val videoWidth = spsDims?.first ?: pendingWidth ?: surfaceWidth
-            val videoHeight = spsDims?.second ?: pendingHeight ?: surfaceHeight
+            // Use parsed SPS dimensions if available, then pending dimensions from frame headers.
+            // Do NOT fall back to surfaceWidth/Height — surface is the display size
+            // (portrait phone = 1080x2340) which corrupts H.265 decoder init.
+            val videoWidth = spsDims?.first ?: pendingWidth ?: 0
+            val videoHeight = spsDims?.second ?: pendingHeight ?: 0
 
             // Ensure we have valid dimensions — H.265 initial config may arrive before
             // frame headers provide width/height. Use a reasonable default to avoid 0x0.
+            // CRITICAL: Do NOT use surfaceWidth/Height as fallback — the surface is the
+            // display size (e.g. 1080x2340 portrait) which is wrong for the video
+            // (e.g. 1920x1080). Wrong dimensions cause green/corrupt first frames.
             val configWidth = if (videoWidth > 0) videoWidth else 1920
             val configHeight = if (videoHeight > 0) videoHeight else 1080
             Log.i(TAG, "Configuring codec with video dims: ${configWidth}x${configHeight} " +
@@ -442,6 +447,14 @@ class MediaCodecDecoder(
             updateStats(decoderName)
             Log.i(TAG, "Codec configured: $decoderName ($mimeType, scaling=$scalingMode)")
             DiagnosticLog.i("video", "Codec selected: $decoderName ($mimeType)")
+
+            // Replay cached IDR if one arrived while codec was configuring
+            val cachedIdr = cachedIdrFrame
+            if (cachedIdr != null) {
+                Log.i(TAG, "Replaying cached IDR after codec configure (${cachedIdr.data.size} bytes)")
+                cachedIdrFrame = null
+                handleKeyframe(cachedIdr)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to configure codec", e)
             DiagnosticLog.e("video", "Failed to configure codec: ${e.message}")

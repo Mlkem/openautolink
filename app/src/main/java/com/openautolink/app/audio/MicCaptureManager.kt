@@ -3,28 +3,30 @@ package com.openautolink.app.audio
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
 import android.os.Process
 import android.util.Log
 import com.openautolink.app.transport.AudioPurpose
-import com.openautolink.app.transport.BridgeConnection
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Captures audio from the car's built-in mic (AAOS AudioRecord) and sends
- * PCM frames to the bridge on the audio channel (direction=1).
+ * PCM frames to the phone via the AA session.
  *
- * Only active when mic source preference is "car". When "phone", the bridge
- * handles mic capture via BT HFP from the phone directly.
+ * Only active when mic source preference is "car". When "phone", the phone
+ * handles mic capture directly.
  *
  * The mic purpose is set based on the current call state:
- *   - IN_CALL → PHONE_CALL purpose (bridge routes to BT SCO)
- *   - Otherwise → ASSISTANT purpose (bridge routes to aasdk for AA voice)
+ *   - IN_CALL → PHONE_CALL purpose
+ *   - Otherwise → ASSISTANT purpose (AA voice recognition)
  *
  * Timer-based sampling at ~40ms intervals (~25 Hz), 512-sample circular reads.
- * Sample rate comes from bridge mic_start control message (typically 16000 Hz).
+ * Sample rate comes from mic_start control message (typically 16000 Hz).
  */
-class MicCaptureManager(private val bridgeConnection: BridgeConnection) {
+class MicCaptureManager(private val sendMicFrame: (AudioFrame) -> Unit) {
 
     companion object {
         private const val TAG = "MicCaptureManager"
@@ -37,6 +39,9 @@ class MicCaptureManager(private val bridgeConnection: BridgeConnection) {
     private var captureThread: Thread? = null
     private var audioRecord: AudioRecord? = null
     private var currentSampleRate: Int = 16000
+    private var noiseSuppressor: NoiseSuppressor? = null
+    private var agc: AutomaticGainControl? = null
+    private var aec: AcousticEchoCanceler? = null
 
     /** Current purpose for outgoing mic frames. Updated by SessionManager on call state changes. */
     private val micPurpose = AtomicReference(AudioPurpose.ASSISTANT)
@@ -122,6 +127,9 @@ class MicCaptureManager(private val bridgeConnection: BridgeConnection) {
         audioRecord = recorder
         recorder.startRecording()
 
+        // Attach hardware DSP audio processing effects for voice quality
+        attachAudioEffects(recorder.audioSessionId)
+
         val readBuf = ByteArray(SAMPLES_PER_READ * 2) // 16-bit PCM = 2 bytes/sample
         var frameCount = 0L
         var silentFrameCount = 0L
@@ -146,7 +154,7 @@ class MicCaptureManager(private val bridgeConnection: BridgeConnection) {
                         channels = 1,
                         data = readBuf.copyOf(bytesRead)
                     )
-                    bridgeConnection.sendMicAudio(frame)
+                    sendMicFrame(frame)
                 } else if (bytesRead < 0) {
                     Log.w(TAG, "AudioRecord.read error: $bytesRead")
                     break
@@ -156,6 +164,7 @@ class MicCaptureManager(private val bridgeConnection: BridgeConnection) {
             // Expected on stop
         } finally {
             Log.i(TAG, "Mic capture ending: $frameCount frames captured, $silentFrameCount silent")
+            releaseAudioEffects()
             try {
                 recorder.stop()
             } catch (_: IllegalStateException) {}
@@ -163,6 +172,53 @@ class MicCaptureManager(private val bridgeConnection: BridgeConnection) {
             audioRecord = null
             capturing.set(false)
         }
+    }
+
+    /**
+     * Attach hardware-accelerated audio processing effects to the AudioRecord session.
+     * NoiseSuppressor reduces road/engine noise, AGC normalizes volume for different
+     * speaker distances, AEC prevents the phone from hearing its own audio output
+     * through the car speakers (echo during calls).
+     */
+    private fun attachAudioEffects(audioSessionId: Int) {
+        if (NoiseSuppressor.isAvailable()) {
+            try {
+                noiseSuppressor = NoiseSuppressor.create(audioSessionId)?.also { it.enabled = true }
+                Log.i(TAG, "NoiseSuppressor attached (enabled=${noiseSuppressor?.enabled})")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to create NoiseSuppressor: ${e.message}")
+            }
+        } else {
+            Log.d(TAG, "NoiseSuppressor not available on this device")
+        }
+
+        if (AutomaticGainControl.isAvailable()) {
+            try {
+                agc = AutomaticGainControl.create(audioSessionId)?.also { it.enabled = true }
+                Log.i(TAG, "AutomaticGainControl attached (enabled=${agc?.enabled})")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to create AGC: ${e.message}")
+            }
+        } else {
+            Log.d(TAG, "AutomaticGainControl not available on this device")
+        }
+
+        if (AcousticEchoCanceler.isAvailable()) {
+            try {
+                aec = AcousticEchoCanceler.create(audioSessionId)?.also { it.enabled = true }
+                Log.i(TAG, "AcousticEchoCanceler attached (enabled=${aec?.enabled})")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to create AEC: ${e.message}")
+            }
+        } else {
+            Log.d(TAG, "AcousticEchoCanceler not available on this device")
+        }
+    }
+
+    private fun releaseAudioEffects() {
+        noiseSuppressor?.release(); noiseSuppressor = null
+        agc?.release(); agc = null
+        aec?.release(); aec = null
     }
 
     /** Compute RMS of 16-bit LE PCM samples for silence detection. */

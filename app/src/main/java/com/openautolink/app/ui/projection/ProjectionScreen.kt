@@ -10,16 +10,13 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -27,11 +24,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -46,16 +41,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.layout
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInParent
+
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -76,16 +66,10 @@ fun ProjectionScreen(
     settingsOverlay: @Composable (onBack: () -> Unit) -> Unit = {},
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val showPhoneSwitcher by viewModel.showPhoneSwitcher.collectAsStateWithLifecycle()
-    val pairedPhones by viewModel.pairedPhones.collectAsStateWithLifecycle()
-    val defaultPhoneMac by viewModel.defaultPhoneMac.collectAsStateWithLifecycle()
-    val switchPhoneStatus by viewModel.switchPhoneStatus.collectAsStateWithLifecycle()
 
-    // Settings overlay state — panel slides from left, video keeps playing
-    // rememberSaveable: survives navigation to SafeAreaEditorScreen and back
+    // Settings overlay state
     var showSettings by rememberSaveable { mutableStateOf(false) }
 
-    // Suppress config_echo DataStore writes while Settings is open
     LaunchedEffect(showSettings) {
         viewModel.setSettingsOpen(showSettings)
     }
@@ -135,17 +119,11 @@ fun ProjectionScreen(
         }
     }
 
-    // Track phone switch button position for popup anchoring
-    var phoneSwitchBtnRootPos by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
-    var phoneSwitchBtnSize by remember { mutableStateOf(IntSize.Zero) }
-    var boxRootPos by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
-
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
             .padding(displayModePadding)
-            .onGloballyPositioned { boxRootPos = it.positionInParent() }
             .testTag("projectionScreen")
     ) {
         // Letterbox: constrain SurfaceView to 16:9 (matching AA video output), centered.
@@ -213,47 +191,6 @@ fun ProjectionScreen(
                 uiState = uiState,
                 modifier = Modifier.align(Alignment.Center)
             )
-        }
-
-        // Phone switch status banner — shown while a switch is in progress
-        val currentSwitchStatus = switchPhoneStatus
-        if (currentSwitchStatus != null && currentSwitchStatus.status == "switching") {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 24.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xCC000000))
-                    .padding(horizontal = 20.dp, vertical = 12.dp)
-                    .testTag("switchPhoneBanner"),
-                contentAlignment = Alignment.Center
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        color = Color.White,
-                        strokeWidth = 2.dp
-                    )
-                    Text(
-                        text = "Switching to ${currentSwitchStatus.targetName}\u2026",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White
-                    )
-                    Text(
-                        text = "Cancel",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .clickable { viewModel.cancelSwitchPhone() }
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                            .testTag("cancelSwitchPhone"),
-                    )
-                }
-            }
         }
 
         // Waiting-for-keyframe indicator — subtle spinner during STREAMING when
@@ -324,73 +261,6 @@ fun ProjectionScreen(
                 modifier = Modifier.testTag("statsButton"),
             )
 
-            // Phone switch button — draggable, togglable in settings
-            if (uiState.overlayPhoneSwitchButton) {
-                Spacer(modifier = Modifier.height(8.dp))
-
-                DraggableOverlayButton(
-                    icon = Icons.Default.PhoneAndroid,
-                    contentDescription = "Switch phone",
-                    onClick = { viewModel.togglePhoneSwitcher() },
-                    positionKey = "overlay_phone_switch",
-                    containerColor = if (showPhoneSwitcher) {
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                    } else {
-                        MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
-                    },
-                    tint = if (showPhoneSwitcher) {
-                        MaterialTheme.colorScheme.onPrimary
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
-                    modifier = Modifier.testTag("phoneSwitchButton"),
-                    onGlobalPosition = { coords ->
-                        phoneSwitchBtnRootPos = coords.positionInParent()
-                        // Walk up to get root-relative position
-                        var c: LayoutCoordinates? = coords
-                        var pos = androidx.compose.ui.geometry.Offset.Zero
-                        while (c != null && c.isAttached) {
-                            pos += c.positionInParent()
-                            c = c.parentLayoutCoordinates
-                        }
-                        phoneSwitchBtnRootPos = pos
-                        phoneSwitchBtnSize = coords.size
-                    },
-                )
-            }
-        }
-
-        // Phone switcher popup — anchored above the phone switch button
-        if (showPhoneSwitcher) {
-            val popupWidthDp = 280.dp
-            val popupGapDp = 8.dp
-            // Button position relative to the Box: subtract Box's root position
-            val btnInBoxX = phoneSwitchBtnRootPos.x - boxRootPos.x
-            val btnInBoxY = phoneSwitchBtnRootPos.y - boxRootPos.y
-            PhoneSwitcherPopup(
-                phones = pairedPhones,
-                currentPhone = uiState.phoneName,
-                defaultPhoneMac = defaultPhoneMac,
-                onSwitchPhone = { mac -> viewModel.switchPhone(mac) },
-                onSetDefaultPhone = { mac -> viewModel.setDefaultPhone(mac) },
-                onDismiss = { viewModel.togglePhoneSwitcher() },
-                modifier = Modifier.layout { measurable, constraints ->
-                    val placeable = measurable.measure(constraints)
-                    layout(placeable.width, placeable.height) {
-                        // Try to right-align popup with button's right edge
-                        var x = (btnInBoxX + phoneSwitchBtnSize.width - placeable.width).toInt()
-                        // Position popup's bottom edge at button's top edge minus gap
-                        val gapPx = popupGapDp.toPx()
-                        var y = (btnInBoxY - placeable.height - gapPx).toInt()
-                        // Clamp to stay within parent bounds
-                        val maxX = constraints.maxWidth - placeable.width
-                        val maxY = constraints.maxHeight - placeable.height
-                        x = x.coerceIn(0, maxX.coerceAtLeast(0))
-                        y = y.coerceIn(0, maxY.coerceAtLeast(0))
-                        placeable.place(x, y)
-                    }
-                }
-            )
         }
 
         // Stats overlay panel — bottom-left
@@ -399,9 +269,6 @@ fun ProjectionScreen(
                 stats = uiState.videoStats,
                 audioStats = uiState.audioStats,
                 sessionState = uiState.sessionState,
-                bridgeName = uiState.bridgeName,
-                bridgeVersionStr = uiState.bridgeVersionStr,
-                bridgeUptimeSeconds = uiState.bridgeUptimeSeconds,
                 phoneName = uiState.phoneName,
                 phoneBatteryLevel = uiState.phoneBatteryLevel,
                 aaPixelAspect = uiState.aaPixelAspect,
@@ -435,9 +302,6 @@ private fun VideoStatsOverlay(
     stats: VideoStats,
     audioStats: AudioStats,
     sessionState: SessionState,
-    bridgeName: String?,
-    bridgeVersionStr: String?,
-    bridgeUptimeSeconds: Long,
     phoneName: String?,
     phoneBatteryLevel: Int?,
     aaPixelAspect: Int,
@@ -456,15 +320,6 @@ private fun VideoStatsOverlay(
             Spacer(modifier = Modifier.height(6.dp))
 
             StatLine("Session", sessionState.name)
-
-            // Bridge info
-            if (bridgeName != null) {
-                val versionStr = bridgeVersionStr?.let { " v$it" } ?: ""
-                StatLine("Bridge", "$bridgeName$versionStr")
-            }
-            if (bridgeUptimeSeconds > 0) {
-                StatLine("Uptime", formatUptime(bridgeUptimeSeconds))
-            }
 
             // Phone info
             if (phoneName != null) {
@@ -586,109 +441,6 @@ private fun formatUptime(seconds: Long): String {
 }
 
 @Composable
-private fun PhoneSwitcherPopup(
-    phones: List<com.openautolink.app.transport.ControlMessage.PairedPhone>,
-    currentPhone: String?,
-    defaultPhoneMac: String,
-    onSwitchPhone: (String) -> Unit,
-    onSetDefaultPhone: (String) -> Unit,
-    onDismiss: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier
-            .width(280.dp)
-            .testTag("phoneSwitcherPopup"),
-        shape = RoundedCornerShape(16.dp),
-        tonalElevation = 8.dp,
-        shadowElevation = 8.dp,
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = "Switch Phone",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            if (phones.isEmpty()) {
-                Text(
-                    text = "Loading paired phones...",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                phones.forEach { phone ->
-                    val isCurrent = phone.aaActive ||
-                            (currentPhone != null && phone.name == currentPhone)
-                    val isDefault = phone.mac.equals(defaultPhoneMac, ignoreCase = true)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable {
-                                if (!isCurrent) onSwitchPhone(phone.mac)
-                            }
-                            .background(
-                                if (isCurrent) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                                else Color.Transparent
-                            )
-                            .padding(horizontal = 12.dp, vertical = 10.dp)
-                            .testTag("switchPhone_${phone.mac}"),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = phone.name.ifBlank { "Unknown" },
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
-                                color = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Unspecified,
-                            )
-                            Text(
-                                text = phone.mac,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 11.sp,
-                            )
-                        }
-                        Column(
-                            horizontalAlignment = Alignment.End,
-                            verticalArrangement = Arrangement.spacedBy(2.dp),
-                        ) {
-                            if (isCurrent) {
-                                Text(
-                                    text = "Active",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                            if (isDefault) {
-                                Text(
-                                    text = "Default",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.tertiary,
-                                )
-                            } else {
-                                Text(
-                                    text = "Set Default",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .clickable { onSetDefaultPhone(phone.mac) }
-                                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                                        .testTag("setDefault_${phone.mac}"),
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun ConnectionHud(
     uiState: ProjectionUiState,
     modifier: Modifier = Modifier
@@ -739,35 +491,12 @@ private fun ConnectionHud(
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
-                SessionState.BRIDGE_CONNECTED -> {
+                SessionState.CONNECTED -> {
                     Text(
-                        text = "Waiting for phone...",
+                        text = "Connected",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.secondary
                     )
-                    uiState.bridgeName?.let { name ->
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Bridge: $name",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = Color(0xFF808080)
-                        )
-                    }
-                }
-                SessionState.PHONE_CONNECTED -> {
-                    Text(
-                        text = "Phone connected",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                    uiState.phoneName?.let { name ->
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = name,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = Color(0xFF808080)
-                        )
-                    }
                 }
                 SessionState.STREAMING -> {
                     // HUD is hidden during streaming

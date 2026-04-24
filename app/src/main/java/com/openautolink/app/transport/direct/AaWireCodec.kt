@@ -124,12 +124,29 @@ class AaWireCodec {
     }
 
     /**
-     * Write the raw version request (special format: 4 bytes, no type field).
-     * `00 01 00 01` for version request, or `00 02 00 00` per HURev.
+     * Write the AA version request — a proper AA framed message.
+     *
+     * Wire format (10 bytes total):
+     * [0]     Channel 0 (CONTROL)
+     * [1]     Flags 0x03 (BULK=FIRST|LAST, PLAIN, SPECIFIC)
+     * [2..3]  Length 6 (2-byte type + 4-byte version payload)
+     * [4..5]  MsgType 0x0001 (VERSION_REQUEST)
+     * [6..7]  Major version (big-endian uint16) — 2
+     * [8..9]  Minor version (big-endian uint16) — 0
+     *
+     * Must match HURev/aasdk format exactly for the phone's AA app to accept it.
      */
     fun writeVersionRequest(out: OutputStream) {
-        // Channel 0, flags 0x01 (version), length 0x0001
-        out.write(byteArrayOf(0x00, 0x01, 0x00, 0x01))
+        val major: Int = 2
+        val minor: Int = 0
+        out.write(byteArrayOf(
+            0x00,                              // channel 0
+            0x03,                              // flags: BULK | PLAIN | SPECIFIC
+            0x00, 0x06,                        // length: 6
+            0x00, 0x01,                        // type: VERSION_REQUEST (1)
+            (major shr 8).toByte(), (major and 0xFF).toByte(),   // major version
+            (minor shr 8).toByte(), (minor and 0xFF).toByte(),   // minor version
+        ))
         out.flush()
     }
 
@@ -143,8 +160,10 @@ class AaWireCodec {
         val flags = header[1].toInt() and 0xFF
         val length = ((header[2].toInt() and 0xFF) shl 8) or (header[3].toInt() and 0xFF)
 
-        if (channel != 0 || flags != 2) {
-            throw IOException("Expected version response, got channel=$channel flags=$flags")
+        // Only check channel — flags may vary (0x03 for BULK, etc.)
+        // Match HURev: check channel=0 and type=2, not flags.
+        if (channel != 0) {
+            throw IOException("Expected version response on channel 0, got channel=$channel flags=0x${flags.toString(16)}")
         }
 
         val body = readFully(input, length)

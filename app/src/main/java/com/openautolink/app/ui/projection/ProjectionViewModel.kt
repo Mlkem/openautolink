@@ -23,7 +23,6 @@ import com.openautolink.app.input.TouchForwarderImpl
 import com.openautolink.app.navigation.ManeuverState
 import com.openautolink.app.session.SessionManager
 import com.openautolink.app.session.SessionState
-import com.openautolink.app.transport.ControlMessage
 import com.openautolink.app.video.VideoStats
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -36,11 +35,7 @@ import kotlinx.coroutines.launch
 data class ProjectionUiState(
     val sessionState: SessionState = SessionState.IDLE,
     val statusMessage: String = "Ready",
-    val bridgeName: String? = null,
-    val bridgeVersion: Int? = null,
-    val bridgeVersionStr: String? = null,
     val phoneName: String? = null,
-    val bridgeHost: String = AppPreferences.DEFAULT_BRIDGE_HOST,
     val videoStats: VideoStats = VideoStats(),
     val audioStats: AudioStats = AudioStats(),
     val showStats: Boolean = false,
@@ -49,16 +44,14 @@ data class ProjectionUiState(
     val phoneBatteryCritical: Boolean = false,
     val voiceSessionActive: Boolean = false,
     val phoneSignalStrength: Int? = null,
-    val bridgeUptimeSeconds: Long = 0,
     val displayMode: String = AppPreferences.DEFAULT_DISPLAY_MODE,
-    val overlayPhoneSwitchButton: Boolean = AppPreferences.DEFAULT_OVERLAY_PHONE_SWITCH_BUTTON,
     val safeAreaTop: Int = AppPreferences.DEFAULT_SAFE_AREA_TOP,
     val safeAreaBottom: Int = AppPreferences.DEFAULT_SAFE_AREA_BOTTOM,
     val safeAreaLeft: Int = AppPreferences.DEFAULT_SAFE_AREA_LEFT,
     val safeAreaRight: Int = AppPreferences.DEFAULT_SAFE_AREA_RIGHT,
     val videoScalingMode: String = AppPreferences.DEFAULT_VIDEO_SCALING_MODE,
-    val aaPixelAspect: Int = AppPreferences.DEFAULT_AA_PIXEL_ASPECT,
-    val aaDpi: Int = AppPreferences.DEFAULT_AA_DPI,
+    val aaPixelAspect: Int = 10000,
+    val aaDpi: Int = 160,
 )
 
 class ProjectionViewModel(application: Application) : AndroidViewModel(application) {
@@ -71,13 +64,12 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
     private val audioManager = application.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val connectivityManager = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private val sessionManager = SessionManager.getInstance(viewModelScope, application, audioManager)
-    @Volatile private var selectedNetworkInterfaceName: String = AppPreferences.DEFAULT_NETWORK_INTERFACE
+    @Volatile private var selectedNetworkInterfaceName: String = ""
     @Volatile private var lastTransportNetworkEventAt: Long = 0L
     private val trackedTransportNetworks = mutableSetOf<Long>()
 
     /** Suppress config_echo DataStore writes while Settings is open. */
     fun setSettingsOpen(open: Boolean) {
-        sessionManager.settingsOpen = open
     }
 
     private val touchForwarder: TouchForwarder = TouchForwarderImpl { touchMessage ->
@@ -99,27 +91,6 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
     private val _videoStats = MutableStateFlow(VideoStats())
     private val _audioStats = MutableStateFlow(AudioStats())
     private val _showStats = MutableStateFlow(false)
-    private val _bridgeUptimeSeconds = MutableStateFlow(0L)
-    private val _pairedPhones = MutableStateFlow<List<com.openautolink.app.transport.ControlMessage.PairedPhone>>(emptyList())
-    private val _showPhoneSwitcher = MutableStateFlow(false)
-    private val _pairingEnabled = MutableStateFlow(true)
-    private val _defaultPhoneMac = MutableStateFlow("")
-    private val _switchPhoneStatus = MutableStateFlow<com.openautolink.app.transport.ControlMessage.SwitchPhoneStatus?>(null)
-
-    /** Paired phones list for the phone switcher popup. */
-    val pairedPhones: StateFlow<List<com.openautolink.app.transport.ControlMessage.PairedPhone>> = _pairedPhones
-
-    /** Current default phone MAC from bridge. */
-    val defaultPhoneMac: StateFlow<String> = _defaultPhoneMac
-
-    /** Current switch status (null = no switch in progress). */
-    val switchPhoneStatus: StateFlow<com.openautolink.app.transport.ControlMessage.SwitchPhoneStatus?> = _switchPhoneStatus
-
-    /** Whether BT pairing is currently enabled on the bridge. */
-    val pairingEnabled: StateFlow<Boolean> = _pairingEnabled
-
-    /** Whether the phone switcher popup is shown. */
-    val showPhoneSwitcher: StateFlow<Boolean> = _showPhoneSwitcher
 
     // Pending surface — stored when surfaceCreated fires before decoder exists.
     // Attached to decoder on session start or when decoder becomes available.
@@ -154,9 +125,7 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
     val uiState: StateFlow<ProjectionUiState> = combine(
         sessionManager.sessionState,
         sessionManager.statusMessage,
-        sessionManager.bridgeInfo,
         _phoneName,
-        preferences.bridgeHost,
         _videoStats,
         _audioStats,
         _showStats,
@@ -165,45 +134,31 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
         sessionManager.phoneBatteryCritical,
         sessionManager.voiceSessionActive,
         preferences.displayMode,
-        preferences.overlayPhoneSwitchButton,
         preferences.safeAreaTop,
         preferences.safeAreaBottom,
         preferences.safeAreaLeft,
         preferences.safeAreaRight,
         sessionManager.phoneSignalStrength,
-        _bridgeUptimeSeconds,
         preferences.videoScalingMode,
-        preferences.aaPixelAspect,
-        preferences.aaDpi,
     ) { values ->
-        @Suppress("UNCHECKED_CAST")
-        val info = values[2] as? com.openautolink.app.session.BridgeInfo
         ProjectionUiState(
             sessionState = values[0] as SessionState,
             statusMessage = values[1] as String,
-            bridgeName = info?.name,
-            bridgeVersion = info?.version,
-            bridgeVersionStr = info?.bridgeVersion,
-            phoneName = values[3] as? String,
-            bridgeHost = values[4] as String,
-            videoStats = values[5] as VideoStats,
-            audioStats = values[6] as AudioStats,
-            showStats = values[7] as Boolean,
-            maneuver = values[8] as? ManeuverState,
-            phoneBatteryLevel = values[9] as? Int,
-            phoneBatteryCritical = values[10] as Boolean,
-            voiceSessionActive = values[11] as Boolean,
-            displayMode = values[12] as String,
-            overlayPhoneSwitchButton = values[13] as Boolean,
-            safeAreaTop = values[14] as Int,
-            safeAreaBottom = values[15] as Int,
-            safeAreaLeft = values[16] as Int,
-            safeAreaRight = values[17] as Int,
-            phoneSignalStrength = values[18] as? Int,
-            bridgeUptimeSeconds = values[19] as Long,
-            videoScalingMode = values[20] as String,
-            aaPixelAspect = values[21] as Int,
-            aaDpi = values[22] as Int,
+            phoneName = values[2] as? String,
+            videoStats = values[3] as VideoStats,
+            audioStats = values[4] as AudioStats,
+            showStats = values[5] as Boolean,
+            maneuver = values[6] as? ManeuverState,
+            phoneBatteryLevel = values[7] as? Int,
+            phoneBatteryCritical = values[8] as Boolean,
+            voiceSessionActive = values[9] as Boolean,
+            displayMode = values[10] as String,
+            safeAreaTop = values[11] as Int,
+            safeAreaBottom = values[12] as Int,
+            safeAreaLeft = values[13] as Int,
+            safeAreaRight = values[14] as Int,
+            phoneSignalStrength = values[15] as? Int,
+            videoScalingMode = values[16] as String,
         )
     }.stateIn(
         viewModelScope,
@@ -212,59 +167,13 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
     )
 
     init {
-        // Observe phone connected/disconnected from control messages
-        viewModelScope.launch {
-            sessionManager.controlMessages.collect { message ->
-                when (message) {
-                    is com.openautolink.app.transport.ControlMessage.PhoneConnected -> {
-                        _phoneName.value = message.phoneName
-                    }
-                    is com.openautolink.app.transport.ControlMessage.PhoneDisconnected -> {
-                        _phoneName.value = null
-                    }
-                    is com.openautolink.app.transport.ControlMessage.PairedPhones -> {
-                        _pairedPhones.value = message.phones
-                        _defaultPhoneMac.value = message.defaultMac
-                    }
-                    is com.openautolink.app.transport.ControlMessage.PairingModeStatus -> {
-                        _pairingEnabled.value = message.enabled
-                    }
-                    is com.openautolink.app.transport.ControlMessage.SwitchPhoneStatus -> {
-                        _switchPhoneStatus.value = if (message.status == "idle") null else message
-                    }
-                    is com.openautolink.app.transport.ControlMessage.Stats -> {
-                        _bridgeUptimeSeconds.value = message.uptimeSeconds
-                    }
-                    else -> {}
-                }
-            }
-        }
-
-        // Push diagnostics setting changes to live session immediately
-        viewModelScope.launch {
-            preferences.remoteDiagnosticsEnabled.collect { enabled ->
-                sessionManager.setDiagnosticsEnabled(enabled)
-            }
-        }
-        viewModelScope.launch {
-            preferences.remoteDiagnosticsMinLevel.collect { level ->
-                sessionManager.setDiagnosticsMinLevel(level)
-            }
-        }
-        viewModelScope.launch {
-            preferences.networkInterface.collect { interfaceName ->
-                selectedNetworkInterfaceName = interfaceName
-            }
-        }
-
         registerTransportNetworkCallback()
 
         // Collect video and audio stats when streaming
         viewModelScope.launch {
             sessionManager.sessionState.collect { state ->
                 // Attach pending surface when decoder becomes available
-                if (state == SessionState.BRIDGE_CONNECTED ||
-                    state == SessionState.PHONE_CONNECTED ||
+                if (state == SessionState.CONNECTED ||
                     state == SessionState.STREAMING) {
                     attachPendingSurface()
                 }
@@ -301,26 +210,42 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
         }
         hasConnected = true
         viewModelScope.launch {
-            val host = preferences.bridgeHost.first()
-            val port = preferences.bridgePort.first()
             val codec = preferences.videoCodec.first()
             val micSrc = preferences.micSource.first()
-            val ifaceName = preferences.networkInterface.first()
-            val diagEnabled = preferences.remoteDiagnosticsEnabled.first()
-            val diagMinLevel = preferences.remoteDiagnosticsMinLevel.first()
             val scalingMode = preferences.videoScalingMode.first()
-            val connectionMode = preferences.connectionMode.first()
             val hotspotSsid = preferences.hotspotSsid.first()
             val hotspotPassword = preferences.hotspotPassword.first()
-            val network = resolveNetwork(ifaceName)
-            val networkResolver = com.openautolink.app.transport.NetworkResolver {
-                resolveNetwork(ifaceName)
-            }
-            sessionManager.start(host, port, codec, micSrc,
-                diagnosticsEnabled = diagEnabled, diagnosticsMinLevel = diagMinLevel,
-                network = network, networkResolver = networkResolver, scalingMode = scalingMode,
-                connectionMode = connectionMode,
-                hotspotSsid = hotspotSsid, hotspotPassword = hotspotPassword)
+            val directTransport = preferences.directTransport.first()
+            val videoAutoNeg = preferences.videoAutoNegotiate.first()
+            val aaRes = preferences.aaResolution.first()
+            val aaDpi = preferences.aaDpi.first()
+            val aaWM = preferences.aaWidthMargin.first()
+            val aaHM = preferences.aaHeightMargin.first()
+            val aaPA = preferences.aaPixelAspect.first()
+            val videoFps = preferences.videoFps.first()
+            val driveSide = preferences.driveSide.first()
+            val hideClock = preferences.hideAaClock.first()
+            val hideSignal = preferences.hidePhoneSignal.first()
+            val hideBattery = preferences.hideBatteryLevel.first()
+            sessionManager.start(
+                codecPreference = codec,
+                micSourcePreference = micSrc,
+                scalingMode = scalingMode,
+                directTransport = directTransport,
+                hotspotSsid = hotspotSsid,
+                hotspotPassword = hotspotPassword,
+                videoAutoNegotiate = videoAutoNeg,
+                aaResolution = aaRes,
+                aaDpi = aaDpi,
+                aaWidthMargin = aaWM,
+                aaHeightMargin = aaHM,
+                aaPixelAspect = aaPA,
+                videoFps = videoFps,
+                driveSide = driveSide,
+                hideClock = hideClock,
+                hideSignal = hideSignal,
+                hideBattery = hideBattery,
+            )
         }
     }
 
@@ -404,45 +329,6 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
 
     fun toggleStats() {
         _showStats.value = !_showStats.value
-    }
-
-    fun togglePhoneSwitcher() {
-        if (!_showPhoneSwitcher.value) {
-            // Request fresh list when opening
-            viewModelScope.launch {
-                com.openautolink.app.transport.ConfigUpdateSender.sendControlMessage(
-                    com.openautolink.app.transport.ControlMessage.ListPairedPhones
-                )
-            }
-        }
-        _showPhoneSwitcher.value = !_showPhoneSwitcher.value
-    }
-
-    fun switchPhone(mac: String) {
-        viewModelScope.launch {
-            com.openautolink.app.transport.ConfigUpdateSender.sendControlMessage(
-                com.openautolink.app.transport.ControlMessage.SwitchPhone(mac)
-            )
-        }
-        _showPhoneSwitcher.value = false
-    }
-
-    fun setDefaultPhone(mac: String) {
-        viewModelScope.launch {
-            com.openautolink.app.transport.ConfigUpdateSender.sendConfigUpdate(
-                mapOf("default_phone_mac" to mac)
-            )
-        }
-        _defaultPhoneMac.value = mac
-    }
-
-    fun cancelSwitchPhone() {
-        viewModelScope.launch {
-            com.openautolink.app.transport.ConfigUpdateSender.sendControlMessage(
-                com.openautolink.app.transport.ControlMessage.CancelSwitchPhone
-            )
-        }
-        _switchPhoneStatus.value = null
     }
 
     /** Forward a touch event from the projection surface to the bridge. */
@@ -529,7 +415,6 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
         if (now - lastTransportNetworkEventAt < 750L) return
         lastTransportNetworkEventAt = now
         Log.i(TAG, "Transport network event: $reason")
-        sessionManager.onTransportNetworkChanged("transport_$reason")
     }
 
     override fun onCleared() {

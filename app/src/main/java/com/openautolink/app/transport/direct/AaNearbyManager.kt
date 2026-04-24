@@ -156,7 +156,7 @@ class AaNearbyManager(
 
     private val connectionCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
-            OalLog.i(TAG, "Connection initiated with ${info.endpointName}, accepting with payloadCallback")
+            OalLog.i(TAG, "Connection initiated with ${info.endpointName}, accepting")
             lastDeviceName = info.endpointName
             isRunning = false
             connectionsClient.stopDiscovery()
@@ -177,11 +177,16 @@ class AaNearbyManager(
             val socket = NearbySocket()
             activeSocket = socket
 
+            // Don't start the AA session yet — wait for the phone's incoming stream
+            // to arrive (onPayloadReceived) AND our outgoing stream to be accepted.
+            // Starting too early causes "Payload transfer FAILED" because Nearby's
+            // internal transport (BT→WiFi Direct upgrade) isn't ready.
             scope.launch(Dispatchers.IO) {
-                // [CRITICAL] Wait before sending. The phone (WirelessHelper) has a
-                // ~500ms delay in its connection logic. If we send too early, the phone
-                // won't have its NearbySocket set yet and our stream will be dropped.
-                OalLog.i(TAG, "Waiting 800ms for phone state sync...")
+                // Match HUR's timing: 800ms delay after connection, then send stream
+                // and start AA immediately. Do NOT wait for phone's stream first —
+                // that causes a deadlock because Nearby won't transmit our stream
+                // until we write data into the pipe, and we don't write until AA starts.
+                OalLog.i(TAG, "Waiting 800ms for Nearby transport to stabilize...")
                 delay(800)
 
                 // Create outgoing pipe (car → phone)
@@ -191,14 +196,17 @@ class AaNearbyManager(
 
                 // Send stream payload to phone
                 val outPayload = Payload.fromStream(pipes[0])
-                OalLog.i(TAG, "Sending stream payload")
+                OalLog.i(TAG, "Sending stream payload to $endpointId")
                 connectionsClient.sendPayload(endpointId, outPayload)
-                    .addOnSuccessListener { OalLog.i(TAG, "Stream payload sent") }
+                    .addOnSuccessListener { OalLog.i(TAG, "Stream payload registered with Nearby") }
                     .addOnFailureListener { e -> OalLog.e(TAG, "Stream send failed: ${e.message}") }
 
-                // Start AA handshake immediately — NearbySocket.read() will block
-                // internally via CountDownLatch until the phone's stream arrives.
+                // Start AA handshake IMMEDIATELY — don't wait for phone's stream.
+                // NearbySocket.getInputStream() blocks via CountDownLatch until the
+                // phone's stream arrives via onPayloadReceived. This matches HUR's
+                // approach and avoids the deadlock where both sides wait for each other.
                 OalLog.i(TAG, "Starting AA session — input will block until phone stream arrives")
+                _status.value = "Connected — starting AA"
                 onSocketReady(socket)
             }
         }
@@ -215,11 +223,10 @@ class AaNearbyManager(
         override fun onPayloadReceived(endpointId: String, payload: Payload) {
             OalLog.i(TAG, "Payload received from $endpointId, type=${payload.type}")
             if (payload.type == Payload.Type.STREAM) {
-                OalLog.i(TAG, "Received stream from phone — setting input stream on socket")
                 val stream = payload.asStream()?.asInputStream()
                 if (stream != null) {
                     activeSocket?.inputStreamWrapper = stream
-                    OalLog.i(TAG, "Input stream set — tunnel is bidirectional")
+                    OalLog.i(TAG, "Phone stream received — input ready")
                 } else {
                     OalLog.e(TAG, "Stream payload was null!")
                 }
@@ -227,8 +234,15 @@ class AaNearbyManager(
         }
 
         override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
-            if (update.status == PayloadTransferUpdate.Status.FAILURE) {
-                OalLog.e(TAG, "Payload transfer failed")
+            when (update.status) {
+                PayloadTransferUpdate.Status.FAILURE -> {
+                    OalLog.e(TAG, "Payload transfer FAILED: id=${update.payloadId} bytes=${update.bytesTransferred}")
+                }
+                PayloadTransferUpdate.Status.SUCCESS -> {
+                    OalLog.d(TAG, "Payload transfer complete: id=${update.payloadId} bytes=${update.bytesTransferred}")
+                }
+                // IN_PROGRESS — don't log, too noisy
+                else -> {}
             }
         }
     }

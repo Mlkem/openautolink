@@ -24,16 +24,15 @@ class ErrorRecoveryTest {
         val states = SessionState.entries
         assert(states.contains(SessionState.ERROR))
         assert(states.contains(SessionState.STREAMING))
-        assert(states.contains(SessionState.PHONE_CONNECTED))
+        assert(states.contains(SessionState.CONNECTED))
     }
 
     @Test
-    fun `STREAMING to PHONE_CONNECTED transition indicates channel loss`() {
-        // When video channel drops, state goes from STREAMING → PHONE_CONNECTED
-        // This is the signal for auto-reconnect
+    fun `PHONE_CONNECTED ConnectionState maps to STREAMING SessionState`() {
+        // ConnectionState.PHONE_CONNECTED maps to SessionState.STREAMING in direct mode
         val streamingState = com.openautolink.app.transport.ConnectionState.STREAMING.toSessionState()
         val phoneState = com.openautolink.app.transport.ConnectionState.PHONE_CONNECTED.toSessionState()
         assertEquals(SessionState.STREAMING, streamingState)
-        assertEquals(SessionState.PHONE_CONNECTED, phoneState)
+        assertEquals(SessionState.STREAMING, phoneState)
     }
 }

@@ -1,30 +1,21 @@
-package com.openautolink.app.diagnostics
+﻿package com.openautolink.app.diagnostics
 
-import com.openautolink.app.transport.ControlMessage
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Remote diagnostics implementation with rate limiting.
- *
- * Sends `app_log` and `app_telemetry` messages to the bridge over
- * the control channel. Rate-limited to 20 log messages/second
- * (newest wins — oldest are dropped when over limit).
- *
- * @param sendMessage function that sends a ControlMessage to the bridge via the control channel
+ * Local diagnostics implementation.
+ * Logs to [DiagnosticLog]'s ring buffer for the in-app diagnostics screen.
  */
-class RemoteDiagnosticsImpl(
-    private val sendMessage: (ControlMessage) -> Unit
-) : RemoteDiagnostics {
+class RemoteDiagnosticsImpl : RemoteDiagnostics {
 
-    private val _enabled = AtomicBoolean(false)
+    private val _enabled = AtomicBoolean(true)
     override val enabled: Boolean get() = _enabled.get()
 
     private val _minLevel = AtomicReference(DiagnosticLevel.INFO)
     override val minLevel: DiagnosticLevel get() = _minLevel.get()
 
-    // Rate limiter: track message count and window start
     private val rateLimitWindowMs = 1000L
     private val maxMessagesPerWindow = 20
     @Volatile private var windowStart = 0L
@@ -43,33 +34,18 @@ class RemoteDiagnosticsImpl(
         if (level.ordinal < _minLevel.get().ordinal) return
         if (!tryAcquireRate()) return
 
-        val truncatedMsg = if (msg.length > 500) msg.take(500) else msg
-        val message = ControlMessage.AppLog(
-            ts = System.currentTimeMillis(),
-            level = level.toWire(),
-            tag = tag,
-            msg = truncatedMsg
-        )
-        sendMessage(message)
+        when (level) {
+            DiagnosticLevel.DEBUG -> DiagnosticLog.d(tag, msg)
+            DiagnosticLevel.INFO -> DiagnosticLog.i(tag, msg)
+            DiagnosticLevel.WARN -> DiagnosticLog.w(tag, msg)
+            DiagnosticLevel.ERROR -> DiagnosticLog.e(tag, msg)
+        }
     }
 
     override fun sendTelemetry(telemetry: TelemetrySnapshot) {
-        if (!_enabled.get()) return
-
-        val message = ControlMessage.AppTelemetry(
-            ts = System.currentTimeMillis(),
-            video = telemetry.video,
-            audio = telemetry.audio,
-            session = telemetry.session,
-            cluster = telemetry.cluster
-        )
-        sendMessage(message)
+        // Local-only — no remote destination
     }
 
-    /**
-     * Rate limiter: allows up to [maxMessagesPerWindow] messages per [rateLimitWindowMs].
-     * Returns true if the message can be sent, false if rate-limited (dropped).
-     */
     private fun tryAcquireRate(): Boolean {
         val now = System.currentTimeMillis()
         if (now - windowStart >= rateLimitWindowMs) {

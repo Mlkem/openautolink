@@ -103,7 +103,11 @@ message Service
             required uint32 margin_height = 4;
             required uint32 density = 5;
             optional uint32 decoder_additional_depth = 6;
+            optional uint32 viewing_distance = 7;
+            optional uint32 pixel_aspect_ratio_e4 = 8;
+            optional uint32 real_density = 9;
             optional MediaCodecType video_codec_type = 10;
+            optional UiConfig ui_config = 11;
         }
 
         required MediaCodecType available_type = 1;
@@ -245,7 +249,29 @@ message ServiceDiscoveryResponse
     optional int32 session_configuration = 13;
     optional string display_name = 14;
     optional bool probe_for_support = 15;
+    optional ConnectionConfiguration connection_configuration = 16;
     optional HeadUnitInfo headunit_info = 17;
+}
+
+message ConnectionConfiguration
+{
+    optional PingConfiguration ping_configuration = 1;
+    optional WirelessTcpConfiguration wireless_tcp_configuration = 2;
+}
+
+message PingConfiguration
+{
+    optional uint32 timeout_ms = 1;
+    optional uint32 interval_ms = 2;
+    optional uint32 high_latency_threshold_ms = 3;
+    optional uint32 tracked_ping_count = 4;
+}
+
+message WirelessTcpConfiguration
+{
+    optional uint32 socket_receive_buffer_size_kb = 1;
+    optional uint32 socket_send_buffer_size_kb = 2;
+    optional uint32 socket_read_timeout_ms = 3;
 }
 
 message ChannelOpenRequest

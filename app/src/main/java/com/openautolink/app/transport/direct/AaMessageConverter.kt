@@ -1,5 +1,6 @@
 ﻿package com.openautolink.app.transport.direct
 
+import android.location.Location
 import com.openautolink.app.proto.Input
 import com.openautolink.app.proto.Sensors
 import com.openautolink.app.transport.ControlMessage
@@ -85,6 +86,7 @@ object AaMessageConverter {
     fun vehicleDataToProto(vd: ControlMessage.VehicleData): AaMessage {
         val batch = Sensors.SensorBatch.newBuilder()
 
+        try {
         // Driving status
         batch.addDrivingStatus(Sensors.SensorBatch.DrivingStatusData.newBuilder()
             .setStatus(if (vd.parkingBrake == true) 0 else 1)
@@ -168,6 +170,15 @@ object AaMessageConverter {
         }
 
         return AaMessage.fromProto(AaChannel.SENSOR, AaMsgType.MEDIA_DATA, batch.build())
+        } catch (e: Exception) {
+            // On non-AAOS devices, vehicle data may have missing required fields.
+            // Return a minimal sensor batch with just driving status.
+            val minimal = Sensors.SensorBatch.newBuilder()
+                .addDrivingStatus(Sensors.SensorBatch.DrivingStatusData.newBuilder()
+                    .setStatus(1).build())
+                .build()
+            return AaMessage.fromProto(AaChannel.SENSOR, AaMsgType.MEDIA_DATA, minimal)
+        }
     }
 
     /**
@@ -220,6 +231,26 @@ object AaMessageConverter {
             .addVehicleEnergyModelData(vem.build())
             .build()
 
+        return AaMessage.fromProto(AaChannel.SENSOR, AaMsgType.MEDIA_DATA, batch)
+    }
+
+    /**
+     * Convert an Android Location to an AA LocationData SensorBatch.
+     * The AA protocol expects: lat/lon as int×1E7, altitude ×1E2,
+     * speed in mm/s (m/s ×1E3), bearing in degrees ×1E6, accuracy ×1E3.
+     */
+    fun locationToProto(location: Location): AaMessage {
+        val batch = Sensors.SensorBatch.newBuilder()
+            .addLocationData(Sensors.SensorBatch.LocationData.newBuilder()
+                .setTimestamp(location.time)
+                .setLatitude((location.latitude * 1E7).toInt())
+                .setLongitude((location.longitude * 1E7).toInt())
+                .setAltitude((location.altitude * 1E2).toInt())
+                .setBearing((location.bearing * 1E6).toInt())
+                .setSpeed((location.speed * 1E3).toInt())
+                .setAccuracy((location.accuracy * 1E3).toInt())
+                .build())
+            .build()
         return AaMessage.fromProto(AaChannel.SENSOR, AaMsgType.MEDIA_DATA, batch)
     }
 }

@@ -26,7 +26,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Abc
-import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Info
@@ -67,7 +66,6 @@ private enum class DiagnosticsTab(
 ) {
     SYSTEM("System", Icons.Default.Info),
     NETWORK("Network", Icons.Default.NetworkCheck),
-    BRIDGE("Bridge", Icons.Default.Cloud),
     CAR("Car", Icons.Default.DirectionsCar),
     LOGS("Logs", Icons.Default.Terminal),
 }
@@ -140,7 +138,6 @@ fun DiagnosticsScreen(
                 when (selectedTab) {
                     DiagnosticsTab.SYSTEM -> SystemTab(uiState.system)
                     DiagnosticsTab.NETWORK -> NetworkTab(uiState.network, uiState.networkProbe, viewModel)
-                    DiagnosticsTab.BRIDGE -> BridgeTab(uiState.bridge)
                     DiagnosticsTab.CAR -> CarTab(uiState.car)
                     DiagnosticsTab.LOGS -> LogsTab(uiState.logs, uiState.logFilter, viewModel)
                 }
@@ -240,16 +237,8 @@ private fun NetworkTab(info: NetworkInfo, probe: NetworkProbeState, viewModel: D
             .fillMaxSize()
             .verticalScroll(rememberScrollState()),
     ) {
-        SectionHeader("Bridge Connection")
-        DiagRow("Host", info.bridgeHost)
-        DiagRow("Port", info.bridgePort.toString())
+        SectionHeader("Session")
         DiagRow("Session", info.sessionState.name, valueColor = sessionStateColor(info.sessionState))
-
-        Spacer(modifier = Modifier.height(16.dp))
-        SectionHeader("TCP Channels")
-        DiagRow("Control (5288)", info.controlState, valueColor = channelStateColor(info.controlState))
-        DiagRow("Video (5290)", info.videoState, valueColor = channelStateColor(info.videoState))
-        DiagRow("Audio (5289)", info.audioState, valueColor = channelStateColor(info.audioState))
 
         Spacer(modifier = Modifier.height(24.dp))
         SectionHeader("Network Probe")
@@ -357,69 +346,8 @@ private fun NetworkTab(info: NetworkInfo, probe: NetworkProbeState, viewModel: D
     }
 }
 
-// --- Bridge Tab ---
-
-@Composable
-private fun BridgeTab(stats: BridgeStats) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
-    ) {
-        SectionHeader("Bridge Info")
-        DiagRow("Name", stats.bridgeName ?: "—")
-        DiagRow("Version", stats.bridgeVersion?.toString() ?: "—")
-        if (stats.capabilities.isNotEmpty()) {
-            DiagRow("Capabilities", stats.capabilities.joinToString(", "))
-        }
-
-        if (stats.uptimeSeconds > 0) {
-            Spacer(modifier = Modifier.height(16.dp))
-            SectionHeader("Bridge Statistics")
-            DiagRow("Uptime", formatUptime(stats.uptimeSeconds))
-            DiagRow("Video frames sent", stats.videoFramesSent.toString())
-            DiagRow("Audio frames sent", stats.audioFramesSent.toString())
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-        SectionHeader("Video Decoder")
-        DiagRow("Codec", stats.videoStats.codec)
-        if (stats.videoStats.width > 0) {
-            DiagRow("Resolution", "${stats.videoStats.width}×${stats.videoStats.height}")
-        }
-        DiagRow("FPS", "${"%.1f".format(stats.videoStats.fps)}",
-            valueColor = if (stats.videoStats.fps >= 25) Color(0xFF4CAF50) else Color(0xFFFF5722))
-        if (stats.videoStats.bitrateKbps > 0) {
-            val bitrateStr = if (stats.videoStats.bitrateKbps >= 1000) {
-                "${"%.1f".format(stats.videoStats.bitrateKbps / 1000)} Mbps"
-            } else {
-                "${stats.videoStats.bitrateKbps.toInt()} kbps"
-            }
-            DiagRow("Bitrate", bitrateStr,
-                valueColor = if (stats.videoStats.bitrateKbps >= 2000) Color(0xFF4CAF50) else Color(0xFFFF9800))
-        }
-        DiagRow("Decoded", stats.videoStats.framesDecoded.toString())
-        DiagRow("Dropped", stats.videoStats.framesDropped.toString(),
-            valueColor = if (stats.videoStats.framesDropped > 0) Color(0xFFFF9800) else Color.White)
-
-        Spacer(modifier = Modifier.height(16.dp))
-        SectionHeader("Audio Player")
-        if (stats.audioStats.activePurposes.isNotEmpty()) {
-            DiagRow("Active", stats.audioStats.activePurposes.joinToString(", ") { it.name.lowercase() })
-            stats.audioStats.underruns.forEach { (purpose, count) ->
-                if (count > 0) {
-                    DiagRow("${purpose.name.lowercase()} underruns", count.toString(),
-                        valueColor = Color(0xFFFF9800))
-                }
-            }
-            stats.audioStats.framesWritten.forEach { (purpose, count) ->
-                DiagRow("${purpose.name.lowercase()} frames", count.toString())
-            }
-        } else {
-            DiagRow("Status", "No active audio")
-        }
-    }
-}
+// --- Streaming Stats Tab (replaces Bridge Tab) ---
+// Video/audio stats are now shown in the System tab or Logs.
 
 // --- Car Tab ---
 
@@ -765,18 +693,10 @@ private fun DiagRow(
 
 private fun sessionStateColor(state: com.openautolink.app.session.SessionState): Color = when (state) {
     com.openautolink.app.session.SessionState.STREAMING -> Color(0xFF4CAF50)
-    com.openautolink.app.session.SessionState.PHONE_CONNECTED,
-    com.openautolink.app.session.SessionState.BRIDGE_CONNECTED -> Color(0xFFFFC107)
+    com.openautolink.app.session.SessionState.CONNECTED -> Color(0xFFFFC107)
     com.openautolink.app.session.SessionState.CONNECTING -> Color(0xFF2196F3)
     com.openautolink.app.session.SessionState.IDLE -> Color(0xFF808080)
     com.openautolink.app.session.SessionState.ERROR -> Color(0xFFFF5722)
-}
-
-private fun channelStateColor(state: String): Color = when (state) {
-    "STREAMING" -> Color(0xFF4CAF50)
-    "CONNECTED" -> Color(0xFFFFC107)
-    "CONNECTING" -> Color(0xFF2196F3)
-    else -> Color(0xFF808080)
 }
 
 private fun severityColor(severity: LogSeverity): Color = when (severity) {
@@ -789,11 +709,4 @@ private fun severityColor(severity: LogSeverity): Color = when (severity) {
 private fun formatTimestamp(ms: Long): String {
     val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
     return sdf.format(java.util.Date(ms))
-}
-
-private fun formatUptime(seconds: Long): String {
-    val h = seconds / 3600
-    val m = (seconds % 3600) / 60
-    val s = seconds % 60
-    return if (h > 0) "${h}h ${m}m ${s}s" else if (m > 0) "${m}m ${s}s" else "${s}s"
 }

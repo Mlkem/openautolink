@@ -1,38 +1,12 @@
-package com.openautolink.app.transport
-
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonPrimitive
+﻿package com.openautolink.app.transport
 
 /**
- * Parsed control messages from the OAL protocol control channel (port 5288).
- * JSON lines — one JSON object per line, bidirectional.
+ * Control messages exchanged between session components.
+ * Used for inter-island communication within the app.
  */
 sealed class ControlMessage {
 
-    companion object {
-        /** App's protocol version — increment when adding breaking changes. */
-        const val PROTOCOL_VERSION = 1
-        /** Minimum bridge protocol version this app supports. */
-        const val MIN_PROTOCOL_VERSION = 1
-    }
-
-    // Bridge → App
-    data class Hello(
-        val version: Int,
-        val name: String,
-        val capabilities: List<String>,
-        val videoPort: Int,
-        val audioPort: Int,
-        val bridgeVersion: String? = null,
-        val bridgeSha256: String? = null,
-        val protocolVersion: Int? = null,
-        val minProtocolVersion: Int? = null,
-        val buildSource: String? = null,
-    ) : ControlMessage()
-
+    // Session lifecycle
     data class PhoneConnected(
         val phoneName: String,
         val phoneType: String
@@ -40,6 +14,7 @@ sealed class ControlMessage {
 
     data class PhoneDisconnected(val reason: String) : ControlMessage()
 
+    // Audio control
     data class AudioStart(
         val purpose: AudioPurpose,
         val sampleRate: Int,
@@ -51,6 +26,7 @@ sealed class ControlMessage {
     data class MicStart(val sampleRate: Int) : ControlMessage()
     object MicStop : ControlMessage()
 
+    // Navigation
     data class NavState(
         val maneuver: String?,
         val distanceMeters: Int?,
@@ -77,6 +53,7 @@ sealed class ControlMessage {
     data class NavLane(val directions: List<NavLaneDirection>)
     data class NavLaneDirection(val shape: String, val highlighted: Boolean)
 
+    // Media
     data class MediaMetadata(
         val title: String?,
         val artist: String?,
@@ -87,14 +64,10 @@ sealed class ControlMessage {
         val albumArtBase64: String? = null
     ) : ControlMessage()
 
-    data class ConfigEcho(val config: Map<String, String>) : ControlMessage()
+    // Error
     data class Error(val code: Int, val message: String) : ControlMessage()
-    data class Stats(
-        val videoFramesSent: Long,
-        val audioFramesSent: Long,
-        val uptimeSeconds: Long
-    ) : ControlMessage()
 
+    // Phone state
     data class PhoneBattery(
         val level: Int,
         val timeRemainingSeconds: Int,
@@ -110,28 +83,6 @@ sealed class ControlMessage {
         val calls: List<PhoneCall>
     ) : ControlMessage()
 
-    data class PairedPhones(
-        val phones: List<PairedPhone>,
-        val defaultMac: String = ""
-    ) : ControlMessage()
-
-    data class PairingModeStatus(
-        val enabled: Boolean
-    ) : ControlMessage()
-
-    data class SwitchPhoneStatus(
-        val targetMac: String,
-        val targetName: String,
-        val status: String  // "switching", "connected", "idle"
-    ) : ControlMessage()
-
-    data class PairedPhone(
-        val mac: String,
-        val name: String,
-        val connected: Boolean,
-        val aaActive: Boolean = false
-    )
-
     data class PhoneCall(
         val state: String,
         val durationSeconds: Int,
@@ -139,25 +90,7 @@ sealed class ControlMessage {
         val callerId: String?
     )
 
-    // App → Bridge
-    data class AppHello(
-        val version: Int,
-        val name: String,
-        val displayWidth: Int,
-        val displayHeight: Int,
-        val displayDpi: Int,
-        val cutoutTop: Int = 0,
-        val cutoutBottom: Int = 0,
-        val cutoutLeft: Int = 0,
-        val cutoutRight: Int = 0,
-        val barTop: Int = 0,
-        val barBottom: Int = 0,
-        val barLeft: Int = 0,
-        val barRight: Int = 0,
-        val videoScalingMode: String = "crop",
-        val decoderFillsSurface: Boolean = false,
-    ) : ControlMessage()
-
+    // Input
     data class Touch(
         val action: Int,
         val x: Float?,
@@ -195,7 +128,7 @@ sealed class ControlMessage {
         val evBatteryLevelWh: Float? = null,
         val evBatteryCapacityWh: Float? = null,
         val driving: Boolean? = null,
-        // EV extended (probed but may not be exposed by all HALs)
+        // EV extended
         val evChargeState: Int? = null,
         val evChargeTimeRemainingSec: Int? = null,
         val evCurrentBatteryCapacityWh: Float? = null,
@@ -205,13 +138,13 @@ sealed class ControlMessage {
         val evRegenBrakingLevel: Int? = null,
         val evStoppingMode: Int? = null,
         val distanceDisplayUnits: Int? = null,
-        // Vehicle identity (static VHAL properties, sent once on connect)
+        // Vehicle identity
         val carMake: String? = null,
         val carModel: String? = null,
         val carYear: String? = null,
-        val fuelTypes: List<Int>? = null,          // INFO_FUEL_TYPE — e.g. [10] = ELECTRIC
-        val evConnectorTypes: List<Int>? = null,   // INFO_EV_CONNECTOR_TYPE — e.g. [1,5] = J1772+COMBO_1
-        // P5: IMU sensors
+        val fuelTypes: List<Int>? = null,
+        val evConnectorTypes: List<Int>? = null,
+        // IMU sensors
         val accelXe3: Int? = null,
         val accelYe3: Int? = null,
         val accelZe3: Int? = null,
@@ -221,11 +154,11 @@ sealed class ControlMessage {
         val compassBearingE6: Int? = null,
         val compassPitchE6: Int? = null,
         val compassRollE6: Int? = null,
-        // P5: GPS satellites
+        // GPS satellites
         val satInUse: Int? = null,
         val satInView: Int? = null,
         val satellites: List<SatelliteInfo>? = null,
-        // P6: RPM
+        // RPM
         val rpmE3: Int? = null
     ) : ControlMessage()
 
@@ -244,54 +177,18 @@ sealed class ControlMessage {
         val longpress: Boolean = false
     ) : ControlMessage()
 
-    data class ConfigUpdate(val config: Map<String, String>) : ControlMessage()
-    data class RestartServices(
-        val wireless: Boolean = false,
-        val bluetooth: Boolean = false
-    ) : ControlMessage()
     object KeyframeRequest : ControlMessage()
-    object ListPairedPhones : ControlMessage()
-    data class SwitchPhone(val mac: String) : ControlMessage()
-    data class ForgetPhone(val mac: String) : ControlMessage()
-    data class SetPairingMode(val enabled: Boolean) : ControlMessage()
-    object CancelSwitchPhone : ControlMessage()
+}
 
-    // Bridge update protocol (App → Bridge)
-    data class BridgeUpdateOffer(
-        val version: String,
-        val size: Int,
-        val sha256: String,
-        val autoApply: Boolean = true
-    ) : ControlMessage()
-
-    data class BridgeUpdateData(
-        val offset: Int,
-        val length: Int,
-        val data: String  // base64
-    ) : ControlMessage()
-
-    data class BridgeUpdateComplete(val sha256: String) : ControlMessage()
-
-    // Bridge update protocol (Bridge → App)
-    data class BridgeUpdateAccept(val dummy: Unit = Unit) : ControlMessage()
-    data class BridgeUpdateReject(val reason: String) : ControlMessage()
-    data class BridgeUpdateStatus(val status: String, val message: String) : ControlMessage()
-
-    // App → Bridge: diagnostic messages
-    data class AppLog(
-        val ts: Long,
-        val level: String,
-        val tag: String,
-        val msg: String
-    ) : ControlMessage()
-
-    data class AppTelemetry(
-        val ts: Long,
-        val video: com.openautolink.app.diagnostics.VideoTelemetry? = null,
-        val audio: com.openautolink.app.diagnostics.AudioTelemetry? = null,
-        val session: com.openautolink.app.diagnostics.SessionTelemetry? = null,
-        val cluster: com.openautolink.app.diagnostics.ClusterTelemetry? = null
-    ) : ControlMessage()
+/**
+ * Transport connection state.
+ */
+enum class ConnectionState {
+    DISCONNECTED,
+    CONNECTING,
+    CONNECTED,        // AA handshake complete
+    PHONE_CONNECTED,  // Phone AA session active, channels opening
+    STREAMING         // Video/audio flowing
 }
 
 enum class AudioPurpose {

@@ -17,13 +17,13 @@ class SessionStateTest {
     }
 
     @Test
-    fun `ConnectionState CONNECTED maps to SessionState BRIDGE_CONNECTED`() {
-        assertEquals(SessionState.BRIDGE_CONNECTED, ConnectionState.CONNECTED.toSessionState())
+    fun `ConnectionState CONNECTED maps to SessionState CONNECTED`() {
+        assertEquals(SessionState.CONNECTED, ConnectionState.CONNECTED.toSessionState())
     }
 
     @Test
-    fun `ConnectionState PHONE_CONNECTED maps to SessionState PHONE_CONNECTED`() {
-        assertEquals(SessionState.PHONE_CONNECTED, ConnectionState.PHONE_CONNECTED.toSessionState())
+    fun `ConnectionState PHONE_CONNECTED maps to SessionState STREAMING`() {
+        assertEquals(SessionState.STREAMING, ConnectionState.PHONE_CONNECTED.toSessionState())
     }
 
     @Test

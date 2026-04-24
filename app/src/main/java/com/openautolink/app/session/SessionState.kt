@@ -1,4 +1,4 @@
-package com.openautolink.app.session
+﻿package com.openautolink.app.session
 
 import com.openautolink.app.transport.ConnectionState
 
@@ -6,10 +6,9 @@ import com.openautolink.app.transport.ConnectionState
  * Session states — maps the full lifecycle from idle to streaming.
  */
 enum class SessionState {
-    IDLE,              // No connection attempt, app just launched
-    CONNECTING,        // Attempting TCP to bridge
-    BRIDGE_CONNECTED,  // TCP established, hello exchanged, waiting for phone
-    PHONE_CONNECTED,   // Phone AA session active, video/audio about to start
+    IDLE,              // No connection, waiting for phone
+    CONNECTING,        // Phone connecting (AA handshake in progress)
+    CONNECTED,         // AA handshake complete, channels opening
     STREAMING,         // Video and/or audio actively flowing
     ERROR              // Unrecoverable error (shows message, user can retry)
 }
@@ -20,7 +19,7 @@ enum class SessionState {
 fun ConnectionState.toSessionState(): SessionState = when (this) {
     ConnectionState.DISCONNECTED -> SessionState.IDLE
     ConnectionState.CONNECTING -> SessionState.CONNECTING
-    ConnectionState.CONNECTED -> SessionState.BRIDGE_CONNECTED
-    ConnectionState.PHONE_CONNECTED -> SessionState.PHONE_CONNECTED
+    ConnectionState.CONNECTED -> SessionState.CONNECTED
+    ConnectionState.PHONE_CONNECTED -> SessionState.STREAMING
     ConnectionState.STREAMING -> SessionState.STREAMING
 }

@@ -97,10 +97,12 @@ class AaSslEngine {
                     }
 
                     // Send TLS record wrapped in AAP frame (channel 0, type 3 = SSL_HANDSHAKE)
+                    // Must use PLAIN flags (0x03) — encryption isn't established yet
                     val tlsBytes = ByteArray(result.bytesProduced())
                     netOutBuffer.flip()
                     netOutBuffer.get(tlsBytes)
-                    val msg = AaMessage.raw(AaChannel.CONTROL, AaMsgType.SSL_HANDSHAKE, tlsBytes)
+                    val msg = AaMessage(AaChannel.CONTROL, 0x03,
+                        AaMsgType.SSL_HANDSHAKE, tlsBytes)
                     codec.encode(msg, output)
                 }
 
@@ -170,9 +172,18 @@ class AaSslEngine {
      */
     fun encrypt(data: ByteArray, offset: Int = 0, length: Int = data.size): ByteArray? {
         return try {
+            val src = ByteBuffer.wrap(data, offset, length)
             netOutBuffer.clear()
-            val result = sslEngine.wrap(ByteBuffer.wrap(data, offset, length), netOutBuffer)
+            var result = sslEngine.wrap(src, netOutBuffer)
             runDelegatedTasks()
+            if (result.status == SSLEngineResult.Status.BUFFER_OVERFLOW) {
+                // Grow buffer to fit the TLS record
+                val needed = sslEngine.session.packetBufferSize + length
+                netOutBuffer = ByteBuffer.allocateDirect(needed)
+                src.position(offset)
+                result = sslEngine.wrap(src, netOutBuffer)
+                runDelegatedTasks()
+            }
             if (result.status != SSLEngineResult.Status.OK) {
                 OalLog.e(TAG, "encrypt wrap failed: ${result.status}")
                 return null
@@ -193,9 +204,17 @@ class AaSslEngine {
      */
     fun decrypt(data: ByteArray, offset: Int = 0, length: Int = data.size): ByteArray? {
         return try {
+            val src = ByteBuffer.wrap(data, offset, length)
             appInBuffer.clear()
-            val result = sslEngine.unwrap(ByteBuffer.wrap(data, offset, length), appInBuffer)
+            var result = sslEngine.unwrap(src, appInBuffer)
             runDelegatedTasks()
+            if (result.status == SSLEngineResult.Status.BUFFER_OVERFLOW) {
+                val needed = sslEngine.session.applicationBufferSize + length
+                appInBuffer = ByteBuffer.allocateDirect(needed)
+                src.position(offset)
+                result = sslEngine.unwrap(src, appInBuffer)
+                runDelegatedTasks()
+            }
             if (result.status != SSLEngineResult.Status.OK) {
                 OalLog.e(TAG, "decrypt unwrap failed: ${result.status}")
                 return null
@@ -225,53 +244,89 @@ class AaSslEngine {
     }
 
     private fun createSslContextInternal(): SSLContext {
-        // Use a self-signed certificate. The phone doesn't verify it
-        // (AA protocol uses SSL_VERIFY_NONE on the client/phone side).
-        val ks = KeyStore.getInstance("AndroidKeyStore")
-        ks.load(null)
+        // Use the standard AA headunit certificate — same one used by aasdk,
+        // HURev, and every other AA headunit implementation. The phone doesn't
+        // verify it (SSL_VERIFY_NONE) but expects a cert to be presented.
+        OalLog.i(TAG, "Creating SSL context with standard AA headunit cert")
 
-        // Check if we already have a key, if not generate one
-        if (!ks.containsAlias("oal_headunit")) {
-            val spec = android.security.keystore.KeyGenParameterSpec.Builder(
-                "oal_headunit",
-                android.security.keystore.KeyProperties.PURPOSE_SIGN or
-                    android.security.keystore.KeyProperties.PURPOSE_VERIFY
-            )
-                .setDigests(android.security.keystore.KeyProperties.DIGEST_SHA256)
-                .setKeySize(2048)
-                .setCertificateSubject(javax.security.auth.x500.X500Principal("CN=OpenAutoLink"))
-                .setCertificateNotBefore(java.util.Date())
-                .setCertificateNotAfter(java.util.Date(System.currentTimeMillis() + 10L * 365 * 24 * 3600 * 1000))
-                .build()
+        val certPem = """
+-----BEGIN CERTIFICATE-----
+MIIDJTCCAg0CAnZTMA0GCSqGSIb3DQEBCwUAMFsxCzAJBgNVBAYTAlVTMRMwEQYD
+VQQIDApDYWxpZm9ybmlhMRYwFAYDVQQHDA1Nb3VudGFpbiBWaWV3MR8wHQYDVQQK
+DBZHb29nbGUgQXV0b21vdGl2ZSBMaW5rMB4XDTE0MDcwODIyNDkxOFoXDTQ0MDcw
+NzIyNDkxOFowVTELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkNBMRYwFAYDVQQHDA1N
+b3VudGFpbiBWaWV3MSEwHwYDVQQKDBhHb29nbGUtQW5kcm9pZC1SZWZlcmVuY2Uw
+ggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQCpqQmvoDW/XsREoj20dRcM
+qJGWh8RlUoHB8CpBpsoqV4nAuvNngkyrdpCf1yg0fVAp2Ugj5eOtzbiN6BxoNHpP
+giZ64pc+JRlwjmyHpssDaHzP+zHZM7acwMcroNVyynSzpiydEDyx/KPtEz5AsKi7
+c7AYYEtnCmAnK/waN1RT5KdZ9f97D9NeF7Ljdk+IKFROJh7Nv/YGiv9GdPZh/ezS
+m2qhD3gzdh9PYs2cu0u+N17PYpSYB7vXPcYa/gmIVipIJ5RuMQVBWrCgtfzwKPqb
+nJQVykm8LnysK+8RCgmPLN3uhsZx6Whax2TVXb1q68DoiaFPhvMfPr2i/9IKaC69
+AgMBAAEwDQYJKoZIhvcNAQELBQADggEBAIpfjQriEtbpUyWLoOOfJsjFN04+ajq9
+1XALCPd+2ixWHZIBJiucrrf0H7OgY7eFnNbU0cRqiDZHI8BtvzFxNi/JgXqCmSHR
+rlaoIsITfqo8KHwcAMs4qWTeLQmkTXBZYz0M3HwC7N1vOGjAJJN5qENIm1Jq+/3c
+fxVg2zhHPKY8qtdgl73YIXb9Xx3WmPCBeRBCKJncj0Rq14uaOjWXRyBgbmdzMXJz
+FGPHx3wN04JqGyfPFlDazXExFQwuAryjoYBRdxPxGufeQCp3am4xxI2oxNIzR+4L
+nOcDhgU1B7sbkVzbKj5gjdOQAmxnKCfBtUNB63a7yzGPYGPIwlBsm54=
+-----END CERTIFICATE-----""".trimIndent()
 
-            val kpg = java.security.KeyPairGenerator.getInstance(
-                android.security.keystore.KeyProperties.KEY_ALGORITHM_RSA,
-                "AndroidKeyStore"
-            )
-            kpg.initialize(spec)
-            kpg.generateKeyPair()
-            OalLog.i(TAG, "Generated self-signed cert for AA SSL")
-        }
+        val keyPem = """
+-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCpqQmvoDW/XsRE
+oj20dRcMqJGWh8RlUoHB8CpBpsoqV4nAuvNngkyrdpCf1yg0fVAp2Ugj5eOtzbiN
+6BxoNHpPgiZ64pc+JRlwjmyHpssDaHzP+zHZM7acwMcroNVyynSzpiydEDyx/KPt
+Ez5AsKi7c7AYYEtnCmAnK/waN1RT5KdZ9f97D9NeF7Ljdk+IKFROJh7Nv/YGiv9G
+dPZh/ezSm2qhD3gzdh9PYs2cu0u+N17PYpSYB7vXPcYa/gmIVipIJ5RuMQVBWrCg
+tfzwKPqbnJQVykm8LnysK+8RCgmPLN3uhsZx6Whax2TVXb1q68DoiaFPhvMfPr2i
+/9IKaC69AgMBAAECggEAbBoW3963IG6jpA+0PW11+EzYJw/u5ZiCsS3z3s0Fd6E7
+VqBIQyXU8FOlpxMSvQ8zqtaVjroGLlIsS88feo4leM+28Qm70I8W/I7jPDPcmxlS
+nbqycnDu5EY5IeVi27eAUI+LUbBs3APb900Rl2p4uKfoBkAlC0yjI5J1GcczZhf7
+RDh1wGgFWZI+ljiSrfpdiA4XmcZ9c7FlO5+NTotZzYeNx1iZprajV1/dlDy8UWEk
+woWtppeGzUf3HHgl8yay62ub2vo5I1Z7Z98Roq8KC1o7k2IXOrHztCl3X03gMwlI
+F4WQ6Fx5LZDU9dfaPhzkutekVgbtO9SzHgb3NXCZwQKBgQDcSS/OLll18ssjBwc7
+PsdaIFIPlF428Tk8qezEnDmHS6xeztkGnpOlilk9jYSsVUbQmq8MwBSjfMVH95B0
+w0yyfOYqjgTocg4lRCoPuBdnuBY/lU1Lws4FoGsGMNFkHWjHzl622mavkJiDzWA+
+CORPUllS/DnPKJnZk2n0zZRKaQKBgQDFKqvePMx/a/ayQ09UZYxov0vwRyNkHevm
+wEGQjOiHKozWvLqWhCvFtwo+VqHqmCw95cYUpg1GvppB6Lnw2uHgWAWxr3ugDjaR
+YSqG/L7FG6FDF+1sPvBuxNpBmto59TI1fBFmU9VBGLDnr1M27qH3KTWlA3lCsovV
+6Dbk7D+vNQKBgE6GgFYdS6KyFBu+a6OA84t7LgWDvDoVr3Oil1ZW4mMKZL2/OroT
+WUqPkNRSWFMeawn9uhzvc+v7lE/dPk+BNxwBTgMpcTJzRfue2ueTljRQ+Q1daZpy
+LQLwdnZUfLAVk752IGlKXYSEJPoHAiHbBZgJIPJmGy1vqbhXxlOP3SbRAoGBAJoA
+Q2/5gy0/sdf5FRxxmOM0D+dkWTNY36pDnrJ+LR1uUcVkckUghWQQHRMl7aBkLaJH
+N5lnPdV1CN3UHnAPNwBZIFFyJJiWoW6aO3JmNceVVjcmmE7FNlz+qw81GaDNcOMv
+vhN0BYyr8Xl1iwTMDXwVFw6FkRBUjz6L+1yBXxjFAoGAJZcU+tEM1+gHPCqHK2bP
+kfYOCyEAro4zY/VWXZKHgCoPau8Uc9+vFu2QVMb5kVyLTdyRLQKpooR6f8En6utS
+/G15YuqRYqzSTrMBzpRrqIwbgKI9RHNPAvhtVAmXnwsYDPIQ1rrELK6WzTjUySRd
+7gyCoq+DlY7ZKDa7FUz05Ek=
+-----END PRIVATE KEY-----""".trimIndent()
 
-        // AndroidKeyStore keys can't be exported to a regular KeyManagerFactory.
-        // Instead, use a custom KeyManager that wraps the AndroidKeyStore entry.
-        val privateKey = ks.getKey("oal_headunit", null) as java.security.PrivateKey
-        val cert = ks.getCertificate("oal_headunit") as X509Certificate
+        // Parse cert
+        val certFactory = java.security.cert.CertificateFactory.getInstance("X.509")
+        val cert = certFactory.generateCertificate(certPem.byteInputStream()) as X509Certificate
+
+        // Parse private key
+        val keyBase64 = keyPem
+            .replace("-----BEGIN PRIVATE KEY-----", "")
+            .replace("-----END PRIVATE KEY-----", "")
+            .replace("\n", "")
+        val keyBytes = android.util.Base64.decode(keyBase64, android.util.Base64.DEFAULT)
+        val keySpec = java.security.spec.PKCS8EncodedKeySpec(keyBytes)
+        val privateKey = java.security.KeyFactory.getInstance("RSA").generatePrivate(keySpec)
+
+        // Build KeyStore
+        val ks = KeyStore.getInstance(KeyStore.getDefaultType())
+        ks.load(null, null)
+        ks.setKeyEntry("headunit", privateKey, charArrayOf(), arrayOf(cert))
 
         val kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
-        val tempKs = KeyStore.getInstance(KeyStore.getDefaultType())
-        tempKs.load(null, null)
-        tempKs.setKeyEntry("headunit", privateKey, charArrayOf(), arrayOf(cert))
-        kmf.init(tempKs, charArrayOf())
+        kmf.init(ks, charArrayOf())
 
-        // Trust all certificates (phone's cert isn't verified by HU)
         val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
             override fun checkClientTrusted(chain: Array<X509Certificate>?, authType: String?) {}
             override fun checkServerTrusted(chain: Array<X509Certificate>?, authType: String?) {}
             override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
         })
 
-        // Try Conscrypt first for TLS session resumption support
         val ctx = try {
             SSLContext.getInstance("TLS", "Conscrypt")
         } catch (_: Exception) {
