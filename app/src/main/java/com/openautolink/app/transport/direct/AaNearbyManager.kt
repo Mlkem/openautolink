@@ -46,8 +46,8 @@ class AaNearbyManager(
 ) {
     companion object {
         private const val TAG = "AaNearby"
-        // Use the same service ID as HURev's companion app for compatibility
-        private const val SERVICE_ID = "com.andrerinas.hurev"
+        // Service ID must match the companion app's NearbyAdvertiser.SERVICE_ID
+        private const val SERVICE_ID = "com.openautolink"
         private val STRATEGY = Strategy.P2P_POINT_TO_POINT
 
         private val _discoveredEndpoints = MutableStateFlow<List<DiscoveredEndpoint>>(emptyList())

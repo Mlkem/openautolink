@@ -1,0 +1,20 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Car icon centered in adaptive icon safe zone -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M72.92,42.01C72.72,41.42 72.16,41 71.5,41h-35c-0.66,0 -1.21,0.42 -1.42,1.01L33,48v8c0,0.55 0.45,1 1,1h1c0.55,0 1,-0.45 1,-1v-1h36v1c0,0.55 0.45,1 1,1h1c0.55,0 1,-0.45 1,-1v-8l-2.08,-5.99zM40.5,52C39.67,52 39,51.33 39,50.5S39.67,49 40.5,49 42,49.67 42,50.5 41.33,52 40.5,52zM67.5,52c-0.83,0 -1.5,-0.67 -1.5,-1.5s0.67,-1.5 1.5,-1.5 1.5,0.67 1.5,1.5 -0.67,1.5 -1.5,1.5zM39,47l1.5,-4.5h27L69,47H39z" />
+    <!-- WiFi signal arcs above car -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,32c-3.04,0 -5.85,1.08 -8.04,2.88l1.74,1.74C49.5,34.94 51.64,34 54,34s4.5,0.94 6.3,2.62l1.74,-1.74C59.85,33.08 57.04,32 54,32z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,36c-1.98,0 -3.78,0.78 -5.12,2.04l1.74,1.74C51.46,38.94 52.66,38.5 54,38.5s2.54,0.44 3.38,1.28l1.74,-1.74C57.78,36.78 55.98,36 54,36z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,41a2,2 0,1 0,0 4a2,2 0,1 0,0 -4z" />
+</vector>
