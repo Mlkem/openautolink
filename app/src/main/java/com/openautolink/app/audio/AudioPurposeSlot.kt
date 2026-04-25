@@ -31,6 +31,7 @@ class AudioPurposeSlot(
     }
 
     private var audioTrack: AudioTrack? = null
+    private var aacDecoder: AacDecoder? = null
 
     /** Per-purpose write thread — isolates blocking AudioTrack.write() calls
      *  so one purpose stalling doesn't block others. */
@@ -175,9 +176,27 @@ class AudioPurposeSlot(
         audioTrack?.setVolume(volume.coerceIn(0f, 1f))
     }
 
+    /**
+     * Feed an AAC-LC encoded frame. Creates an AacDecoder on first call
+     * which decodes to PCM and routes through feedPcm().
+     */
+    fun feedAac(data: ByteArray) {
+        if (!active.get()) return
+        var decoder = aacDecoder
+        if (decoder == null) {
+            decoder = AacDecoder(sampleRate, channelCount) { pcm -> feedPcm(pcm) }
+            aacDecoder = decoder
+            decoder.start()
+            Log.i(TAG, "$purpose: AAC decoder started (${sampleRate}Hz ${channelCount}ch)")
+        }
+        decoder.queueAacFrame(data)
+    }
+
     fun release() {
         if (released.getAndSet(true)) return
         stop()
+        aacDecoder?.stop()
+        aacDecoder = null
         writeExecutor?.shutdownNow()
         writeExecutor = null
         audioTrack?.release()

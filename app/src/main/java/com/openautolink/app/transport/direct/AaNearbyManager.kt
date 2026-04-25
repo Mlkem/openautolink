@@ -1,6 +1,8 @@
 package com.openautolink.app.transport.direct
 
+import android.annotation.SuppressLint
 import android.content.Context
+import android.net.wifi.p2p.WifiP2pManager
 import com.openautolink.app.diagnostics.OalLog
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.ConnectionInfo
@@ -53,6 +55,10 @@ class AaNearbyManager(
 
         private val _status = MutableStateFlow("Not started")
         val status: StateFlow<String> = _status
+
+        private val _wifiFrequencyMhz = MutableStateFlow(0)
+        /** WiFi Direct frequency in MHz (0 = unknown). >4000 = 5GHz, >0 = 2.4GHz. */
+        val wifiFrequencyMhz: StateFlow<Int> = _wifiFrequencyMhz
     }
 
     data class DiscoveredEndpoint(val id: String, val name: String)
@@ -99,9 +105,55 @@ class AaNearbyManager(
         }
     }
 
+    @SuppressLint("MissingPermission")
+    private fun detectWifiFrequency() {
+        // Delay slightly — Nearby may still be upgrading BT→WiFi Direct
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            try {
+                val p2pManager = context.getSystemService(Context.WIFI_P2P_SERVICE) as? WifiP2pManager
+                if (p2pManager == null) {
+                    OalLog.w(TAG, "WiFi P2P not available — cannot detect frequency")
+                    return@postDelayed
+                }
+                val p2pChannel = p2pManager.initialize(context, context.mainLooper, null)
+                p2pManager.requestGroupInfo(p2pChannel) { group ->
+                    if (group != null) {
+                        var freq = 0
+                        // Try public API first (API 30+)
+                        try {
+                            val getFreq = group.javaClass.getMethod("getFrequency")
+                            freq = getFreq.invoke(group) as? Int ?: 0
+                        } catch (_: Exception) {}
+                        // Fallback: try reflection on hidden fields
+                        if (freq <= 0) {
+                            try {
+                                for (name in arrayOf("frequency", "mFrequency")) {
+                                    try {
+                                        val field = group.javaClass.getDeclaredField(name)
+                                        field.isAccessible = true
+                                        freq = field.getInt(group)
+                                        if (freq > 0) break
+                                    } catch (_: Exception) {}
+                                }
+                            } catch (_: Exception) {}
+                        }
+                        val band = if (freq > 4000) "5GHz" else if (freq > 0) "2.4GHz" else "unknown"
+                        OalLog.i(TAG, "WiFi Direct frequency: ${freq}MHz ($band)")
+                        _wifiFrequencyMhz.value = freq
+                    } else {
+                        OalLog.d(TAG, "No P2P group info available (Nearby manages transport internally)")
+                    }
+                }
+            } catch (e: Exception) {
+                OalLog.w(TAG, "Could not detect WiFi frequency: ${e.message}")
+            }
+        }, 2000) // 2s delay for transport upgrade
+    }
+
     fun stop() {
         OalLog.i(TAG, "Stopping")
         isRunning = false
+        _wifiFrequencyMhz.value = 0
         isConnecting = false
         connectionsClient.stopDiscovery()
         activeEndpointId?.let {
@@ -207,6 +259,7 @@ class AaNearbyManager(
                 // approach and avoids the deadlock where both sides wait for each other.
                 OalLog.i(TAG, "Starting AA session — input will block until phone stream arrives")
                 _status.value = "Connected — starting AA"
+                detectWifiFrequency()
                 onSocketReady(socket)
             }
         }

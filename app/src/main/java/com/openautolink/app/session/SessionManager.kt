@@ -155,6 +155,9 @@ class SessionManager(
     private val _phoneSignalStrength = MutableStateFlow<Int?>(null)
     val phoneSignalStrength: StateFlow<Int?> = _phoneSignalStrength.asStateFlow()
 
+    // WiFi frequency (from Nearby's underlying WiFi Direct)
+    val wifiFrequencyMhz: StateFlow<Int> = AaNearbyManager.wifiFrequencyMhz
+
     // Media session
     private var _mediaSessionManager: OalMediaSessionManager? = null
 
@@ -301,20 +304,17 @@ class SessionManager(
         val session = DirectAaSession(scope, ctx)
 
         // Get the actual projection surface dimensions for pixel_aspect auto-computation.
-        // currentWindowMetrics respects the current display mode:
-        //   - fullscreen_immersive: full physical display (e.g., 2914×1134)
-        //   - system_ui_visible: display minus system bars (e.g., 2628×1134)
-        // This gives us the actual area where the video surface renders.
+        // Use the full display bounds — in projection mode the app is always fullscreen
+        // (immersive mode hides system bars). The pixel_aspect tells AA about the
+        // physical display shape so it renders UI correctly on wide displays.
+        // DO NOT subtract system bar insets: getInsetsIgnoringVisibility() returns
+        // non-zero values even when bars are hidden, which would incorrectly shrink
+        // the display dimensions and produce wrong pixel_aspect values.
         val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
         val metrics = wm.currentWindowMetrics
-        val insets = metrics.windowInsets.getInsetsIgnoringVisibility(
-            android.view.WindowInsets.Type.systemBars()
-        )
-        val displayW = metrics.bounds.width() - insets.left - insets.right
-        val displayH = metrics.bounds.height() - insets.top - insets.bottom
-        Log.i(TAG, "Projection surface for pixel_aspect: ${displayW}x${displayH} " +
-            "(bounds=${metrics.bounds.width()}x${metrics.bounds.height()} " +
-            "insets=L${insets.left} T${insets.top} R${insets.right} B${insets.bottom})")
+        val displayW = metrics.bounds.width()
+        val displayH = metrics.bounds.height()
+        Log.i(TAG, "Display for pixel_aspect: ${displayW}x${displayH}")
 
         // Map resolution string to pixel dimensions
         val (resW, resH) = when (aaResolution) {
@@ -353,6 +353,23 @@ class SessionManager(
         session.hideClock = hideClock
         session.hideSignal = hideSignal
         session.hideBattery = hideBattery
+
+        // Bluetooth service — get car's BT MAC for phone pairing
+        try {
+            @Suppress("MissingPermission")
+            val btAdapter = android.bluetooth.BluetoothAdapter.getDefaultAdapter()
+            val btMac = btAdapter?.address ?: ""
+            session.btMacAddress = btMac
+            if (btMac.isNotEmpty() && btMac != "02:00:00:00:00:00") {
+                Log.i(TAG, "Bluetooth MAC for AA: $btMac")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not get BT MAC: ${e.message}")
+        }
+
+        // AAC audio — reduces bandwidth ~10x vs PCM over WiFi
+        session.useAacAudio = true
+
         session.hotspotSsid = hotspotSsid
         session.hotspotPassword = hotspotPassword
         session.directTransport = directTransport

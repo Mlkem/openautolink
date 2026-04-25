@@ -273,6 +273,7 @@ fun ProjectionScreen(
                 phoneBatteryLevel = uiState.phoneBatteryLevel,
                 aaPixelAspect = uiState.aaPixelAspect,
                 aaDpi = uiState.aaDpi,
+                wifiFrequencyMhz = uiState.wifiFrequencyMhz,
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .padding(12.dp)
@@ -306,6 +307,7 @@ private fun VideoStatsOverlay(
     phoneBatteryLevel: Int?,
     aaPixelAspect: Int,
     aaDpi: Int,
+    wifiFrequencyMhz: Int = 0,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -320,6 +322,13 @@ private fun VideoStatsOverlay(
             Spacer(modifier = Modifier.height(6.dp))
 
             StatLine("Session", sessionState.name)
+
+            // WiFi band
+            if (wifiFrequencyMhz > 0) {
+                val band = if (wifiFrequencyMhz > 4000) "5 GHz" else "2.4 GHz"
+                StatLine("WiFi", "$band (${wifiFrequencyMhz} MHz)",
+                    valueColor = if (wifiFrequencyMhz > 4000) Color.Green else Color(0xFFFFFF00))
+            }
 
             // Phone info
             if (phoneName != null) {

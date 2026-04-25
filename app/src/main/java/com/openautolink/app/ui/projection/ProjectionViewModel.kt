@@ -44,6 +44,7 @@ data class ProjectionUiState(
     val phoneBatteryCritical: Boolean = false,
     val voiceSessionActive: Boolean = false,
     val phoneSignalStrength: Int? = null,
+    val wifiFrequencyMhz: Int = 0,
     val displayMode: String = AppPreferences.DEFAULT_DISPLAY_MODE,
     val safeAreaTop: Int = AppPreferences.DEFAULT_SAFE_AREA_TOP,
     val safeAreaBottom: Int = AppPreferences.DEFAULT_SAFE_AREA_BOTTOM,
@@ -140,6 +141,7 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
         preferences.safeAreaRight,
         sessionManager.phoneSignalStrength,
         preferences.videoScalingMode,
+        sessionManager.wifiFrequencyMhz,
     ) { values ->
         ProjectionUiState(
             sessionState = values[0] as SessionState,
@@ -159,6 +161,7 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
             safeAreaRight = values[14] as Int,
             phoneSignalStrength = values[15] as? Int,
             videoScalingMode = values[16] as String,
+            wifiFrequencyMhz = values[17] as Int,
         )
     }.stateIn(
         viewModelScope,

@@ -1,5 +1,7 @@
 package com.openautolink.app.video
 
+import java.io.ByteArrayOutputStream
+
 /**
  * NAL unit parser for H.264 and H.265 bitstreams.
  * Identifies NAL types from raw codec data to detect SPS/PPS/VPS and IDR frames.
@@ -302,6 +304,143 @@ object NalParser {
         fun readSe(): Int {
             val ue = readUe()
             return if (ue % 2 == 0) -(ue / 2) else (ue + 1) / 2
+        }
+
+        fun skipBits(n: Int) {
+            for (i in 0 until n) {
+                if (bytePos >= data.size) throw IndexOutOfBoundsException()
+                bitPos++
+                if (bitPos == 8) {
+                    bitPos = 0
+                    bytePos++
+                }
+            }
+        }
+    }
+
+    /**
+     * Parse H.265 SPS NAL unit to extract video resolution.
+     * Finds the SPS NAL in the data and reads pic_width_in_luma_samples
+     * and pic_height_in_luma_samples.
+     *
+     * Returns Pair(width, height) or null if SPS cannot be parsed.
+     */
+    fun parseH265SpsResolution(data: ByteArray): Pair<Int, Int>? {
+        var offset = 0
+        while (offset < data.size) {
+            val pos = findStartCode(data, offset)
+            if (pos < 0) break
+            val scLen = startCodeLength(data, pos)
+            val nalBytePos = pos + scLen
+            if (nalBytePos + 1 >= data.size) break
+            val nalType = h265NalType(data[nalBytePos])
+            if (nalType == H265_NAL_SPS) {
+                return parseH265SpsNal(data, nalBytePos)
+            }
+            offset = nalBytePos + 1
+        }
+        return null
+    }
+
+    private fun parseH265SpsNal(data: ByteArray, nalStart: Int): Pair<Int, Int>? {
+        try {
+            // Convert NAL to RBSP by removing emulation prevention bytes (0x00 0x00 0x03)
+            val rbsp = removeEmulationPreventionBytes(data, nalStart)
+            // H.265 NAL header is 2 bytes (not 1 like H.264)
+            val reader = BitReader(rbsp, 2)
+
+            // sps_video_parameter_set_id: u(4)
+            reader.readBits(4)
+            // sps_max_sub_layers_minus1: u(3)
+            val maxSubLayers = reader.readBits(3)
+            // sps_temporal_id_nesting_flag: u(1)
+            reader.readBits(1)
+
+            // profile_tier_level(1, maxSubLayers)
+            skipProfileTierLevel(reader, maxSubLayers)
+
+            // sps_seq_parameter_set_id: ue(v)
+            reader.readUe()
+            // chroma_format_idc: ue(v)
+            val chromaFormatIdc = reader.readUe()
+            if (chromaFormatIdc == 3) {
+                // separate_colour_plane_flag: u(1)
+                reader.readBits(1)
+            }
+
+            // pic_width_in_luma_samples: ue(v)
+            val width = reader.readUe()
+            // pic_height_in_luma_samples: ue(v)
+            val height = reader.readUe()
+
+            return if (width > 0 && height > 0) Pair(width, height) else null
+        } catch (e: Exception) {
+            return null
+        }
+    }
+
+    /**
+     * Remove emulation prevention bytes (0x00 0x00 0x03 → 0x00 0x00) from NAL data.
+     * Required before RBSP parsing — the bitstream inserts 0x03 bytes to prevent
+     * false start code detection, and these must be stripped for correct parsing.
+     */
+    private fun removeEmulationPreventionBytes(data: ByteArray, nalStart: Int): ByteArray {
+        val result = ByteArrayOutputStream(data.size - nalStart)
+        var i = nalStart
+        while (i < data.size) {
+            if (i + 2 < data.size &&
+                data[i] == 0.toByte() && data[i + 1] == 0.toByte() && data[i + 2] == 3.toByte()
+            ) {
+                result.write(0)
+                result.write(0)
+                i += 3 // skip the 0x03 prevention byte
+            } else {
+                result.write(data[i].toInt() and 0xFF)
+                i++
+            }
+        }
+        return result.toByteArray()
+    }
+
+    /**
+     * Skip profile_tier_level() in the H.265 SPS bitstream.
+     * This structure has a fixed-size part plus variable sub_layer data.
+     */
+    private fun skipProfileTierLevel(reader: BitReader, maxSubLayers: Int) {
+        // general_profile_space(2) + general_tier_flag(1) + general_profile_idc(5)
+        reader.readBits(8)
+        // general_profile_compatibility_flag[32]
+        reader.skipBits(32)
+        // general_progressive_source_flag(1) + interlaced(1) + non_packed(1) + frame_only(1)
+        // + general_constraint_flags(44)
+        reader.skipBits(48)
+        // general_level_idc(8)
+        reader.readBits(8)
+
+        // sub_layer_profile_present_flag[i] and sub_layer_level_present_flag[i]
+        val subLayerProfilePresent = BooleanArray(maxSubLayers)
+        val subLayerLevelPresent = BooleanArray(maxSubLayers)
+        for (i in 0 until maxSubLayers) {
+            subLayerProfilePresent[i] = reader.readBits(1) == 1
+            subLayerLevelPresent[i] = reader.readBits(1) == 1
+        }
+        // Align to byte boundary if maxSubLayers < 8
+        if (maxSubLayers in 1..7) {
+            reader.skipBits((8 - maxSubLayers) * 2)
+        }
+        // Sub-layer profile/level data
+        for (i in 0 until maxSubLayers) {
+            if (subLayerProfilePresent[i]) {
+                // sub_layer_profile_space(2) + tier_flag(1) + profile_idc(5)
+                reader.skipBits(8)
+                // sub_layer_profile_compatibility_flag[32]
+                reader.skipBits(32)
+                // sub_layer constraint flags (48 bits)
+                reader.skipBits(48)
+            }
+            if (subLayerLevelPresent[i]) {
+                reader.skipBits(8) // sub_layer_level_idc
+            }
         }
     }
 }

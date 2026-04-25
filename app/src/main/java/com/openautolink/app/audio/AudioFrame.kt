@@ -11,7 +11,8 @@ data class AudioFrame(
     val purpose: AudioPurpose,
     val sampleRate: Int,
     val channels: Int,
-    val data: ByteArray
+    val data: ByteArray,
+    val isAac: Boolean = false,  // true = AAC-LC encoded, false = raw PCM
 ) {
     val isPlayback: Boolean get() = direction == DIRECTION_PLAYBACK
     val isMic: Boolean get() = direction == DIRECTION_MIC

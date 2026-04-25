@@ -169,7 +169,11 @@ class AudioPlayerImpl(private val audioManager: AudioManager) : AudioPlayer {
             lastAudioLogTime = now
         }
 
-        slot.feedPcm(frame.data)
+        if (frame.isAac) {
+            slot.feedAac(frame.data)
+        } else {
+            slot.feedPcm(frame.data)
+        }
     }
 
     override fun startPurpose(purpose: AudioPurpose, sampleRate: Int, channels: Int) {

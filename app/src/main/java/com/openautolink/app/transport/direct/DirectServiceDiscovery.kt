@@ -38,6 +38,8 @@ object DirectServiceDiscovery {
     fun build(
         video: VideoConfig = VideoConfig(),
         vehicle: VehicleIdentity = VehicleIdentity(),
+        btMacAddress: String = "",
+        useAacAudio: Boolean = false,
         hideClock: Boolean = true,
         hideSignal: Boolean = true,
         hideBattery: Boolean = true,
@@ -58,9 +60,11 @@ object DirectServiceDiscovery {
         services.add(buildInputService(video.width, video.height))
 
         // 4. Audio services (system, speech, media)
-        services.add(buildAudioService(AaChannel.AUDIO_SYSTEM, Media.AudioStreamType.SYSTEM, 16000, 16, 1))
-        services.add(buildAudioService(AaChannel.AUDIO_SPEECH, Media.AudioStreamType.SPEECH, 16000, 16, 1))
-        services.add(buildAudioService(AaChannel.AUDIO_MEDIA, Media.AudioStreamType.MEDIA, 48000, 16, 2))
+        val audioCodec = if (useAacAudio) Media.MediaCodecType.MEDIA_CODEC_AUDIO_AAC_LC
+            else Media.MediaCodecType.MEDIA_CODEC_AUDIO_PCM
+        services.add(buildAudioService(AaChannel.AUDIO_SYSTEM, Media.AudioStreamType.SYSTEM, 16000, 16, 1, audioCodec))
+        services.add(buildAudioService(AaChannel.AUDIO_SPEECH, Media.AudioStreamType.SPEECH, 16000, 16, 1, audioCodec))
+        services.add(buildAudioService(AaChannel.AUDIO_MEDIA, Media.AudioStreamType.MEDIA, 48000, 16, 2, audioCodec))
 
         // 5. Mic service (PCM 16kHz mono)
         services.add(buildMicService())
@@ -79,6 +83,19 @@ object DirectServiceDiscovery {
                 .setType(Control.Service.NavigationStatusService.ClusterType.ImageCodesOnly)
                 .build())
             .build())
+
+        // 8. Bluetooth service — enables phone to discover car's BT for HFP/A2DP
+        if (btMacAddress.isNotEmpty() && btMacAddress != "02:00:00:00:00:00") {
+            services.add(Control.Service.newBuilder()
+                .setId(AaChannel.BLUETOOTH)
+                .setBluetoothService(Control.Service.BluetoothService.newBuilder()
+                    .setCarAddress(btMacAddress)
+                    .addSupportedPairingMethods(Control.BluetoothPairingMethod.A2DP)
+                    .addSupportedPairingMethods(Control.BluetoothPairingMethod.HFP)
+                    .build())
+                .build())
+            OalLog.i("DirectSD", "Bluetooth service: $btMacAddress (A2DP+HFP)")
+        }
 
         // Build session config bitmask for hiding UI elements
         var sessionConfig = 0
@@ -282,11 +299,12 @@ object DirectServiceDiscovery {
         sampleRate: Int,
         bits: Int,
         channels: Int,
+        codecType: Media.MediaCodecType = Media.MediaCodecType.MEDIA_CODEC_AUDIO_PCM,
     ): Control.Service {
         return Control.Service.newBuilder()
             .setId(channel)
             .setMediaSinkService(Control.Service.MediaSinkService.newBuilder()
-                .setAvailableType(Media.MediaCodecType.MEDIA_CODEC_AUDIO_PCM)
+                .setAvailableType(codecType)
                 .setAudioType(streamType)
                 .addAudioConfigs(Media.AudioConfiguration.newBuilder()
                     .setSampleRate(sampleRate)

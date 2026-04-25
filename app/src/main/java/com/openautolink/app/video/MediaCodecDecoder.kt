@@ -96,6 +96,11 @@ class MediaCodecDecoder(
     // The bridge-side fix (no stale IDR replay) ensures the first IDR the app
     // receives is always fresh from the phone, so a single-IDR gate suffices.
     @Volatile private var renderingEnabled = false
+    // Skip first few frames after codec init to avoid green hue from resolution
+    // transition. When codec is configured at 1920x1080 but video is 2560x1440,
+    // the first frames decode with wrong color plane alignment until the codec
+    // internally adjusts via output format change.
+    @Volatile private var outputFormatReceived = false
 
     override fun attach(surface: Surface, width: Int, height: Int) {
         val surfaceChanged = this.surface !== surface
@@ -401,10 +406,11 @@ class MediaCodecDecoder(
             }
 
             // Parse codec config to get actual video dimensions
-            // H.264: parse SPS NAL. H.265: parse from frame headers (SPS parsing is complex)
-            val spsDims = if (mimeType == CodecSelector.MIME_H264) {
-                NalParser.parseSpsResolution(configData)
-            } else null
+            val spsDims = when (mimeType) {
+                CodecSelector.MIME_H264 -> NalParser.parseSpsResolution(configData)
+                CodecSelector.MIME_H265 -> NalParser.parseH265SpsResolution(configData)
+                else -> null
+            }
             // Use parsed SPS dimensions if available, then pending dimensions from frame headers.
             // Do NOT fall back to surfaceWidth/Height — surface is the display size
             // (portrait phone = 1080x2340) which corrupts H.265 decoder init.
@@ -437,6 +443,7 @@ class MediaCodecDecoder(
             catch (_: Exception) {}
             codec = mc
             firstFrameRendered = false
+            outputFormatReceived = false
             decodeStartTimeMs = System.currentTimeMillis()
             renderingEnabled = false  // Don't render until first IDR is queued
 
@@ -586,9 +593,12 @@ class MediaCodecDecoder(
                     val outputIndex = mc.dequeueOutputBuffer(bufferInfo, OUTPUT_TIMEOUT_US)
                     when {
                         outputIndex >= 0 -> {
-                            if (!renderingEnabled) {
-                                // Don't render until first IDR is decoded — prevents
-                                // green/blocky frames from stale P-frames
+                            // Don't render until:
+                            // 1. IDR received (renderingEnabled) — prevents green from stale P-frames
+                            // 2. Output format received (outputFormatReceived) — prevents green from
+                            //    codec resolution transition (configured 1920x1080 but video is 2560x1440)
+                            val shouldRender = renderingEnabled && outputFormatReceived
+                            if (!shouldRender) {
                                 mc.releaseOutputBuffer(outputIndex, false)
                             } else {
                                 // Render to surface — this is live UI state, render immediately
@@ -606,6 +616,7 @@ class MediaCodecDecoder(
                         outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                             val format = mc.outputFormat
                             Log.i(TAG, "Output format changed: $format")
+                            outputFormatReceived = true
                             val w = format.getInteger(MediaFormat.KEY_WIDTH, 0)
                             val h = format.getInteger(MediaFormat.KEY_HEIGHT, 0)
                             if (w > 0 && h > 0) {

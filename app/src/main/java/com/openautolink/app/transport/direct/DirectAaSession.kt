@@ -113,6 +113,12 @@ class DirectAaSession(
     var hideSignal = true
     var hideBattery = true
 
+    // Audio codec — true if we announced AAC-LC (phone will send AAC frames)
+    var useAacAudio = false
+
+    // Bluetooth MAC — set before start() for BT service announcement
+    var btMacAddress = ""
+
     /** Hotspot credentials for BT handshake. Set from settings before start(). */
     var hotspotSsid: String
         get() = btHandshake.hotspotSsid
@@ -422,6 +428,8 @@ class DirectAaSession(
                 OalLog.i(TAG, "ServiceDiscoveryRequest received")
                 val response = DirectServiceDiscovery.build(
                     videoConfig, vehicleIdentity,
+                    btMacAddress = btMacAddress,
+                    useAacAudio = useAacAudio,
                     hideClock = hideClock, hideSignal = hideSignal, hideBattery = hideBattery,
                 )
                 sendMessage(AaMessage.fromProto(AaChannel.CONTROL, AaMsgType.SERVICE_DISCOVERY_RESPONSE, response))
@@ -652,17 +660,19 @@ class DirectAaSession(
                 AaChannel.AUDIO_SYSTEM -> AudioPurpose.ALERT
                 else -> AudioPurpose.MEDIA
             }
-            val pcm = if (msg.payloadOffset == 0 && msg.payloadLength == msg.payload.size) {
-                msg.payload
-            } else {
-                msg.payload.copyOfRange(msg.payloadOffset, msg.payloadOffset + msg.payloadLength)
-            }
+            // Audio MEDIA_DATA has an 8-byte timestamp prefix before the actual audio data
+            // (same as video). Skip it — the audio player doesn't need timestamps.
+            val audioOffset = msg.payloadOffset + 8
+            val audioLength = msg.payloadLength - 8
+            if (audioLength <= 0) return
+            val audioData = msg.payload.copyOfRange(audioOffset, audioOffset + audioLength)
             _audioFrames.emit(AudioFrame(
                 direction = AudioFrame.DIRECTION_PLAYBACK,
                 purpose = purpose,
                 sampleRate = if (msg.channel == AaChannel.AUDIO_MEDIA) 48000 else 16000,
                 channels = if (msg.channel == AaChannel.AUDIO_MEDIA) 2 else 1,
-                data = pcm,
+                data = audioData,
+                isAac = useAacAudio,
             ))
 
             // Ack audio
@@ -779,13 +789,20 @@ class DirectAaSession(
         if (msg.type == AaMsgType.MEDIA_DATA || msg.type == AaMsgType.MEDIA_START) {
             try {
                 val data = msg.payload.copyOfRange(msg.payloadOffset, msg.payloadOffset + msg.payloadLength)
-                val status = Control.ServiceDiscoveryResponse.parseFrom(data)
-                // Phone status is embedded in the PhoneStatusService on the control proto
-                // For now, just log and try to extract signal/calls from the raw data
-                OalLog.d(TAG, "PhoneStatus received (${data.size}B)")
-                // TODO: parse PhoneStatus_Call and signal_strength when proto is available
-            } catch (_: Exception) {
-                OalLog.d(TAG, "PhoneStatus (${msg.payloadLength}B)")
+                val status = Control.Service.PhoneStatusService.parseFrom(data)
+                val calls = status.callsList.map { call ->
+                    ControlMessage.PhoneCall(
+                        state = call.state?.name ?: "UNKNOWN",
+                        durationSeconds = if (call.hasCallDurationSeconds()) call.callDurationSeconds.toInt() else 0,
+                        callerNumber = if (call.hasCallerNumber()) call.callerNumber else null,
+                        callerId = if (call.hasCallerId()) call.callerId else null,
+                    )
+                }
+                val signalStrength = if (status.hasSignalStrength()) status.signalStrength.toInt() else null
+                OalLog.d(TAG, "PhoneStatus: signal=$signalStrength calls=${calls.size}")
+                _controlMessages.emit(ControlMessage.PhoneStatus(signalStrength, calls))
+            } catch (e: Exception) {
+                OalLog.d(TAG, "PhoneStatus parse error (${msg.payloadLength}B): ${e.message}")
             }
         } else {
             handleChannelControl(msg)
