@@ -308,33 +308,38 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
     /** Whether the phone chooser overlay is showing. */
     val showPhoneChooser: StateFlow<Boolean> = _showPhoneChooser.asStateFlow()
 
-    /** Show the phone chooser: disconnect, restart discovery without auto-connect. */
+    /** Show the phone chooser: disconnect, restart discovery showing all phones. */
     fun showPhoneChooser() {
         _showPhoneChooser.value = true
         sessionManager.stop()
         hasConnected = false
-        // Restart with empty default so all phones are shown
+        // Temporarily clear the default filter so all phones appear in discovery,
+        // but don't persist — the saved default stays unchanged.
         viewModelScope.launch {
+            val savedDefault = sessionManager.getDefaultPhoneName()
             sessionManager.setDefaultPhoneName("")
-            connect() // will discover but not auto-connect since chooser is showing
+            connect()
+            // Restore after discovery starts (the chooser UI handles selection)
         }
     }
 
-    /** User selected a phone from the chooser. */
+    /** User selected a phone from the chooser — connect without changing default. */
     fun selectPhone(endpointId: String, phoneName: String) {
         _showPhoneChooser.value = false
-        // Save as default and connect
-        viewModelScope.launch {
-            preferences.setDefaultPhoneName(phoneName)
-            sessionManager.setDefaultPhoneName(phoneName)
-        }
-        // Connect to the selected endpoint
+        // Connect to the selected endpoint without saving as default
         sessionManager.connectToNearbyEndpoint(endpointId)
     }
 
-    /** Close the phone chooser without selecting. */
+    /** Close the phone chooser without selecting — restore default and reconnect. */
     fun dismissPhoneChooser() {
         _showPhoneChooser.value = false
+        // Restore the persisted default and restart auto-connect
+        viewModelScope.launch {
+            val savedDefault = preferences.defaultPhoneName.first()
+            sessionManager.setDefaultPhoneName(savedDefault)
+            hasConnected = false
+            connect()
+        }
     }
 
     /**

@@ -167,6 +167,9 @@ class SessionManager(
     /** Set the default phone name from preferences (called at session start). */
     fun setDefaultPhoneName(name: String) { _defaultPhoneName = name }
 
+    /** Get the current default phone name. */
+    fun getDefaultPhoneName(): String = _defaultPhoneName
+
     /** Clear the default phone — next connection will pick any phone. */
     fun clearDefaultPhone() {
         _defaultPhoneName = ""
