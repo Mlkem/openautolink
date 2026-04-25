@@ -210,8 +210,7 @@ Active development, stable for daily use on a 2024 Chevrolet Blazer EV.
 
 ## Known Issues
 
-- **Steering wheel controls on GM EVs:** the left-side rocker maps to skip forward and play/pause only. Previous-track is not exposed by GM. The voice button is consumed by the system before the app can intercept it.
-- **"Unsupported device" popup:** if using a USB Ethernet adapter for the legacy bridge mode, GM shows a brief cosmetic warning.
+No critical issues at this time. If you encounter problems, please [open an issue](https://github.com/mossyhub/openautolink/issues).
 
 ## Compatibility
 
