@@ -101,17 +101,6 @@ object DirectServiceDiscovery {
             .setHideProjectedClock(hideClock)
             .setSessionConfiguration(sessionConfig)
             .setDisplayName("OpenAutoLink")
-            .setConnectionConfiguration(Control.ConnectionConfiguration.newBuilder()
-                .setPingConfiguration(Control.PingConfiguration.newBuilder()
-                    .setTimeoutMs(10000)
-                    .setIntervalMs(2500)
-                    .build())
-                .setWirelessTcpConfiguration(Control.WirelessTcpConfiguration.newBuilder()
-                    .setSocketReceiveBufferSizeKb(256)
-                    .setSocketSendBufferSizeKb(256)
-                    .setSocketReadTimeoutMs(30000)
-                    .build())
-                .build())
             .build()
     }
 

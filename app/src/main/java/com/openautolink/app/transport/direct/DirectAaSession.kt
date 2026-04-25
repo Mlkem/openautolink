@@ -4,6 +4,7 @@ import com.openautolink.app.audio.AudioFrame
 import com.openautolink.app.diagnostics.OalLog
 import com.openautolink.app.proto.Control
 import com.openautolink.app.proto.Media
+import com.openautolink.app.proto.Sensors
 import com.openautolink.app.transport.AudioPurpose
 import com.openautolink.app.transport.ConnectionState
 import com.openautolink.app.transport.ControlMessage
@@ -88,6 +89,9 @@ class DirectAaSession(
 
     private var videoAssembler: AaVideoAssembler? = null
     private var unackedFrames = 0
+    // Per-channel session IDs from MediaStart — used in MediaAck responses.
+    // The phone assigns a session ID per channel; we must echo it back in acks.
+    private val channelSessionIds = java.util.concurrent.ConcurrentHashMap<Int, Int>()
 
     // BT handshake for automatic phone connection
     private val btHandshake = AaBtHandshakeManager(scope)
@@ -490,6 +494,20 @@ class DirectAaSession(
                     .build()
                 sendMessage(AaMessage.fromProto(msg.channel, AaMsgType.CHANNEL_OPEN_RESPONSE, response))
 
+                // When SENSOR channel opens, immediately send DrivingStatus = UNRESTRICTED.
+                // The phone needs this to know the head unit is ready. Without it,
+                // the phone times out after ~2.5 minutes assuming the HU is unresponsive.
+                // This matches HUR's behavior (AapControl.channelOpenRequest).
+                if (msg.channel == AaChannel.SENSOR) {
+                    val drivingStatus = Sensors.SensorBatch.newBuilder()
+                        .addDrivingStatus(Sensors.SensorBatch.DrivingStatusData.newBuilder()
+                            .setStatus(1) // UNRESTRICTED
+                            .build())
+                        .build()
+                    sendMessage(AaMessage.fromProto(AaChannel.SENSOR, AaMsgType.MEDIA_DATA, drivingStatus))
+                    OalLog.i(TAG, "DrivingStatus UNRESTRICTED sent on SENSOR channel")
+                }
+
                 // Don't send VideoFocusNotification here — wait for MEDIA_SETUP.
                 // HUR sends VideoFocus only after responding to MEDIA_SETUP with Config.
                 // Sending it too early causes the phone to send a tiny probe frame before
@@ -527,7 +545,15 @@ class DirectAaSession(
             }
 
             AaMsgType.MEDIA_START -> {
-                OalLog.i(TAG, "MediaStart on ${AaChannel.name(msg.channel)}")
+                // Parse session ID from MediaStart protobuf and store per-channel
+                try {
+                    val data = msg.payload.copyOfRange(msg.payloadOffset, msg.payloadOffset + msg.payloadLength)
+                    val start = Media.Start.parseFrom(data)
+                    channelSessionIds[msg.channel] = start.sessionId
+                    OalLog.i(TAG, "MediaStart on ${AaChannel.name(msg.channel)} (sessionId=${start.sessionId})")
+                } catch (e: Exception) {
+                    OalLog.i(TAG, "MediaStart on ${AaChannel.name(msg.channel)} (unparsed)")
+                }
                 // Emit audio start for audio channels
                 if (AaChannel.isAudio(msg.channel)) {
                     val purpose = when (msg.channel) {
@@ -586,7 +612,7 @@ class DirectAaSession(
                     unackedFrames++
                     if (unackedFrames >= MAX_UNACKED / 2) {
                         val ack = Media.Ack.newBuilder()
-                            .setSessionId(1)
+                            .setSessionId(channelSessionIds[AaChannel.VIDEO] ?: 1)
                             .setAck(unackedFrames)
                             .build()
                         sendMessage(AaMessage.fromProto(AaChannel.VIDEO, AaMsgType.MEDIA_ACK, ack))
@@ -640,7 +666,7 @@ class DirectAaSession(
             ))
 
             // Ack audio
-            val ack = Media.Ack.newBuilder().setSessionId(1).setAck(1).build()
+            val ack = Media.Ack.newBuilder().setSessionId(channelSessionIds[msg.channel] ?: 1).setAck(1).build()
             sendMessage(AaMessage.fromProto(msg.channel, AaMsgType.MEDIA_ACK, ack))
         } else {
             handleChannelControl(msg)
