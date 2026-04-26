@@ -231,8 +231,9 @@ void JniSession::start(JNIEnv* env, jobject transportPipe, jobject callback, job
             *strand_, messenger_);
 
         // 4. Service channels (created now, started after SDR)
+        // Video uses channel ID 2 (MEDIA_SINK) matching Java implementation
         videoChannel_ = std::make_shared<aasdk::channel::mediasink::video::VideoMediaSinkService>(
-            *strand_, messenger_, aasdk::messenger::ChannelId::MEDIA_SINK_VIDEO);
+            *strand_, messenger_, aasdk::messenger::ChannelId::MEDIA_SINK);
         mediaAudioChannel_ = std::make_shared<aasdk::channel::mediasink::audio::channel::MediaAudioChannel>(
             *strand_, messenger_);
         guidanceAudioChannel_ = std::make_shared<aasdk::channel::mediasink::audio::channel::GuidanceAudioChannel>(
@@ -811,9 +812,13 @@ void JniSession::buildServiceDiscoveryResponse(
     response.set_head_unit_software_build("1");
     response.set_head_unit_software_version("1.0");
 
+    // Session configuration (bitmask: bit0=hide clock, bit1=hide signal, bit2=hide battery)
+    // Java implementation sets this to 7 (all hidden) — may affect preflight authorization
+    response.set_session_configuration(7);
+
     // ---- Video channel (matches bridge exactly — NO audio_type) ----
     { auto* svc = response.add_channels();
-      svc->set_id(static_cast<int32_t>(aasdk::messenger::ChannelId::MEDIA_SINK_VIDEO));
+      svc->set_id(2); // VIDEO — Java uses 2 (MEDIA_SINK), works with localhost proxy
       auto* ms = svc->mutable_media_sink_service();
       ms->set_available_type(aap_protobuf::service::media::shared::message::MEDIA_CODEC_VIDEO_H264_BP);
       ms->set_available_while_in_call(true);
