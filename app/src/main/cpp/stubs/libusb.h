@@ -27,21 +27,23 @@ extern "C" {
 
 /* Do NOT define USB_TYPE_VENDOR — aasdk defines its own as a constexpr */
 
-/* Error codes */
-#define LIBUSB_SUCCESS            0
-#define LIBUSB_ERROR_IO          -1
-#define LIBUSB_ERROR_INVALID_PARAM -2
-#define LIBUSB_ERROR_ACCESS      -3
-#define LIBUSB_ERROR_NO_DEVICE   -4
-#define LIBUSB_ERROR_NOT_FOUND   -5
-#define LIBUSB_ERROR_BUSY        -6
-#define LIBUSB_ERROR_TIMEOUT     -7
-#define LIBUSB_ERROR_OVERFLOW    -8
-#define LIBUSB_ERROR_PIPE        -9
-#define LIBUSB_ERROR_INTERRUPTED -10
-#define LIBUSB_ERROR_NO_MEM      -11
-#define LIBUSB_ERROR_NOT_SUPPORTED -12
-#define LIBUSB_ERROR_OTHER       -99
+/* Error codes — must be an enum, not #defines, because aasdk uses libusb_error::LIBUSB_SUCCESS */
+enum libusb_error {
+    LIBUSB_SUCCESS            = 0,
+    LIBUSB_ERROR_IO           = -1,
+    LIBUSB_ERROR_INVALID_PARAM = -2,
+    LIBUSB_ERROR_ACCESS       = -3,
+    LIBUSB_ERROR_NO_DEVICE    = -4,
+    LIBUSB_ERROR_NOT_FOUND    = -5,
+    LIBUSB_ERROR_BUSY         = -6,
+    LIBUSB_ERROR_TIMEOUT      = -7,
+    LIBUSB_ERROR_OVERFLOW     = -8,
+    LIBUSB_ERROR_PIPE         = -9,
+    LIBUSB_ERROR_INTERRUPTED  = -10,
+    LIBUSB_ERROR_NO_MEM       = -11,
+    LIBUSB_ERROR_NOT_SUPPORTED = -12,
+    LIBUSB_ERROR_OTHER        = -99
+};
 
 typedef struct libusb_context libusb_context;
 typedef struct libusb_device libusb_device;
