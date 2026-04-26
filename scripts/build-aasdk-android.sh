@@ -130,22 +130,19 @@ SHIMEOF
 
 # Build
 BUILD_DIR="$WORK_DIR/build"
-rm -rf "$BUILD_DIR"
-mkdir -p "$BUILD_DIR"
 
-# Step 1: Build host-native protoc (x86_64) so it can run during cross-compile.
-# The cross-compiled protoc (ARM64) can't execute on the build host.
-HOST_BUILD_DIR="$WORK_DIR/host-protoc-build"
+# Step 1: Build host-native aasdk (x86_64).
+# This gives us a working host protoc AND pre-generated protobuf .pb.h/.pb.cc files.
+HOST_BUILD_DIR="$WORK_DIR/host-build"
 HOST_PROTOC="$HOST_BUILD_DIR/bin/protoc"
 if [ ! -f "$HOST_PROTOC" ]; then
     echo ""
-    echo "=== Building host protoc (x86_64) ==="
+    echo "=== Building host aasdk (x86_64) — for protoc + proto generation ==="
     echo ""
     rm -rf "$HOST_BUILD_DIR"
     mkdir -p "$HOST_BUILD_DIR"
     cd "$HOST_BUILD_DIR"
 
-    # Configure aasdk for host — only need protoc binary
     cmake "$AASDK_NATIVE" \
         -DCMAKE_BUILD_TYPE=Release \
         -DBUILD_AASDK_STATIC=ON \
@@ -162,16 +159,33 @@ if [ ! -f "$HOST_PROTOC" ]; then
         -DAASDK_TEST=OFF \
         2>&1
 
-    cmake --build . --target protoc -j$(nproc) 2>&1
-    echo "Host protoc built: $(ls -la "$HOST_PROTOC" 2>&1)"
+    # Build everything for host — aasdk + aap_protobuf + protobuf + abseil
+    cmake --build . --target aasdk aap_protobuf -j$(nproc) 2>&1
+    echo ""
+    echo "Host build complete:"
+    ls -la "$HOST_PROTOC" 2>&1
+    find "$HOST_BUILD_DIR" -name "libaasdk.a" 2>&1
 fi
 
+# Step 2: Cross-compile aasdk for Android ARM64.
+# Use SKIP_BUILD_PROTOBUF=ON and point to the host-built protobuf + pre-generated headers.
 echo ""
-echo "=== Configuring aasdk for Android ARM64 ==="
+echo "=== Configuring aasdk for Android ARM64 (cross-compile) ==="
 echo ""
 
+rm -rf "$BUILD_DIR"
+mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
+# Copy the pre-generated protobuf .pb.h/.pb.cc from host build
+# so we don't need to run protoc during cross-compile
+echo "Copying pre-generated protobuf sources from host build..."
+mkdir -p "$BUILD_DIR/protobuf"
+cp -r "$HOST_BUILD_DIR/protobuf/"* "$BUILD_DIR/protobuf/" 2>/dev/null || true
+
+# For cross-compile: use system protoc path (host-built) and skip protobuf build
+# We link against the cross-compiled libprotobuf from the host's FetchContent sources
+# rebuilt with the NDK toolchain
 cmake "$AASDK_NATIVE" \
     -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
     -DANDROID_ABI=arm64-v8a \
@@ -191,14 +205,25 @@ cmake "$AASDK_NATIVE" \
     -DAASDK_TEST=OFF \
     2>&1
 
-# Replace the ARM64 protoc with the host protoc so proto generation works
-echo "Replacing ARM64 protoc with host protoc..."
-cp "$HOST_PROTOC" "$BUILD_DIR/bin/protoc"
-# Also fix the protobuf::protoc target — symlink into the FetchContent build dir
-PROTO_BUILD="$BUILD_DIR/_deps/protobuf-build"
-if [ -d "$PROTO_BUILD" ]; then
-    cp "$HOST_PROTOC" "$PROTO_BUILD/protoc" 2>/dev/null || true
-fi
+# After configure: the build system created a protobuf::protoc target pointing
+# to the ARM64 protoc binary which can't run on x86_64. Replace it with
+# the host-built protoc. Also create a wrapper script that protobuf_generate
+# can find by the target name.
+echo "Injecting host protoc into cross-compile build..."
+CROSS_PROTOC_DIR="$BUILD_DIR/bin"
+mkdir -p "$CROSS_PROTOC_DIR"
+cp "$HOST_PROTOC" "$CROSS_PROTOC_DIR/protoc"
+# Also overwrite the ARM64 protoc in the FetchContent build dir
+find "$BUILD_DIR/_deps/protobuf-build" -name "protoc" -type f -exec cp "$HOST_PROTOC" {} \; 2>/dev/null
+# Create a symlink/script so "protobuf::protoc" resolves to the host binary
+# The Makefile uses the literal string "protobuf::protoc" as a command — create a wrapper
+mkdir -p "$BUILD_DIR/.protoc_shim"
+cat > "$BUILD_DIR/.protoc_shim/protobuf::protoc" << 'SHIMEOF'
+#!/bin/bash
+exec "$(dirname "$0")/../bin/protoc" "$@"
+SHIMEOF
+chmod +x "$BUILD_DIR/.protoc_shim/protobuf::protoc"
+export PATH="$BUILD_DIR/.protoc_shim:$PATH"
 
 echo ""
 echo "=== Building aasdk ==="
