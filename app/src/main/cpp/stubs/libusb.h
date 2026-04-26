@@ -25,8 +25,7 @@ extern "C" {
 #define LIBUSB_RECIPIENT_DEVICE      0x00
 #define LIBUSB_RECIPIENT_INTERFACE   0x01
 
-/* Convenience aliases used by aasdk */
-#define USB_TYPE_VENDOR LIBUSB_REQUEST_TYPE_VENDOR
+/* Do NOT define USB_TYPE_VENDOR — aasdk defines its own as a constexpr */
 
 /* Error codes */
 #define LIBUSB_SUCCESS            0
