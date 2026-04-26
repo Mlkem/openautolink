@@ -21,6 +21,7 @@
 #include <aap_protobuf/service/control/message/AudioFocusNotification.pb.h>
 #include <aap_protobuf/service/control/message/NavFocusNotification.pb.h>
 #include <aap_protobuf/service/control/message/PingResponse.pb.h>
+#include <aap_protobuf/service/control/message/PingRequest.pb.h>
 #include <aap_protobuf/service/control/message/ByeByeResponse.pb.h>
 #include <aap_protobuf/service/control/message/DriverPosition.pb.h>
 #include <aap_protobuf/service/media/shared/message/Config.pb.h>
@@ -227,8 +228,8 @@ void JniSession::start(JNIEnv* env, jobject transportPipe, jobject callback, job
             *strand_, messenger_);
 
         // 4. Service channels (created now, started after SDR)
-        videoChannel_ = std::make_shared<aasdk::channel::mediasink::video::channel::VideoChannel>(
-            *strand_, messenger_);
+        videoChannel_ = std::make_shared<aasdk::channel::mediasink::video::VideoMediaSinkService>(
+            *strand_, messenger_, aasdk::messenger::ChannelId::MEDIA_SINK_VIDEO);
         mediaAudioChannel_ = std::make_shared<aasdk::channel::mediasink::audio::channel::MediaAudioChannel>(
             *strand_, messenger_);
         guidanceAudioChannel_ = std::make_shared<aasdk::channel::mediasink::audio::channel::GuidanceAudioChannel>(
@@ -509,7 +510,34 @@ void JniSession::onPingRequest(
 void JniSession::onPingResponse(
     const aap_protobuf::service::control::message::PingResponse& /*response*/)
 {
+    pingOutstanding_ = false;
     controlChannel_->receive(shared_from_this());
+}
+
+void JniSession::sendPing()
+{
+    if (stopped_ || !controlChannel_) return;
+    pingOutstanding_ = true;
+    aap_protobuf::service::control::message::PingRequest request;
+    request.set_timestamp(std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+    auto promise = aasdk::channel::SendPromise::defer(*strand_);
+    promise->then([]() {}, [this](const auto& e) { this->onChannelError(e); });
+    controlChannel_->sendPingRequest(request, std::move(promise));
+}
+
+void JniSession::schedulePing()
+{
+    if (stopped_) return;
+    auto timer = std::make_shared<boost::asio::deadline_timer>(
+        *ioService_, boost::posix_time::milliseconds(1500));
+    timer->async_wait([this, timer, self = shared_from_this()](const boost::system::error_code& ec) {
+        if (ec || stopped_) return;
+        if (!pingOutstanding_) {
+            sendPing();
+        }
+        schedulePing();
+    });
 }
 
 void JniSession::onChannelError(const aasdk::error::Error& e)
@@ -709,6 +737,10 @@ void JniSession::startAllHandlers()
     }
 
     LOGI("All %d handlers started", 9);
+
+    // Send initial ping (bridge does this — phone expects HU to initiate pings)
+    sendPing();
+    schedulePing();
 
     // Send initial VideoFocusIndication to tell phone we want video
     {

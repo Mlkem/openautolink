@@ -27,7 +27,7 @@
 #include <aasdk/Channel/Control/IControlServiceChannelEventHandler.hpp>
 #include <aasdk/Channel/MediaSink/Video/VideoMediaSinkService.hpp>
 #include <aasdk/Channel/MediaSink/Video/IVideoMediaSinkServiceEventHandler.hpp>
-#include <aasdk/Channel/MediaSink/Video/Channel/VideoChannel.hpp>
+#include <aasdk/Channel/MediaSink/Video/VideoMediaSinkService.hpp>
 #include <aasdk/Channel/MediaSink/Audio/AudioMediaSinkService.hpp>
 #include <aasdk/Channel/MediaSink/Audio/IAudioMediaSinkServiceEventHandler.hpp>
 #include <aasdk/Channel/MediaSink/Audio/Channel/MediaAudioChannel.hpp>
@@ -171,6 +171,8 @@ public:
     // ---- Dispatch methods (called by handler classes → JNI) ----
     void dispatchAudioFrame(const uint8_t* data, size_t size, int purpose, int sampleRate, int channels);
     void sendUnsolicitedAudioFocusGain(); // called by audio handlers after setup
+    void sendPing();      // proactive HU→phone ping (bridge does this)
+    void schedulePing();  // periodic ping timer
     void dispatchMicRequest(bool open);
     void dispatchNavStatus(int status);
     void dispatchNavTurn(const std::string& maneuver, const std::string& road,
@@ -207,10 +209,11 @@ private:
     aasdk::messenger::ICryptor::Pointer cryptor_;
     aasdk::transport::ITransport::Pointer rawTransport_;
     aasdk::messenger::IMessenger::Pointer messenger_;
+    std::atomic<bool> pingOutstanding_{false};
 
     // Channels
     std::shared_ptr<aasdk::channel::control::ControlServiceChannel> controlChannel_;
-    std::shared_ptr<aasdk::channel::mediasink::video::channel::VideoChannel> videoChannel_;
+    std::shared_ptr<aasdk::channel::mediasink::video::VideoMediaSinkService> videoChannel_;
     std::shared_ptr<aasdk::channel::mediasink::audio::AudioMediaSinkService> mediaAudioChannel_;
     std::shared_ptr<aasdk::channel::mediasink::audio::AudioMediaSinkService> guidanceAudioChannel_;
     std::shared_ptr<aasdk::channel::mediasink::audio::AudioMediaSinkService> systemAudioChannel_;
