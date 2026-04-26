@@ -63,6 +63,8 @@ Gmaps_teardown/
 tmp_bugreport.zip
 tmp_bugreport/
 tmp_screenshot.*
+tmp_*_logcat.txt
+tmp_test*.txt
 
 # Code review output
 codereview.md
