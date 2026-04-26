@@ -12,6 +12,38 @@
 extern "C" {
 #endif
 
+/* Endpoint direction constants */
+#define LIBUSB_ENDPOINT_DIR_MASK  0x80
+#define LIBUSB_ENDPOINT_IN        0x80
+#define LIBUSB_ENDPOINT_OUT       0x00
+#define LIBUSB_TRANSFER_TYPE_MASK 0x03
+
+/* Request types */
+#define LIBUSB_REQUEST_TYPE_STANDARD  (0x00 << 5)
+#define LIBUSB_REQUEST_TYPE_CLASS     (0x01 << 5)
+#define LIBUSB_REQUEST_TYPE_VENDOR    (0x02 << 5)
+#define LIBUSB_RECIPIENT_DEVICE      0x00
+#define LIBUSB_RECIPIENT_INTERFACE   0x01
+
+/* Convenience aliases used by aasdk */
+#define USB_TYPE_VENDOR LIBUSB_REQUEST_TYPE_VENDOR
+
+/* Error codes */
+#define LIBUSB_SUCCESS            0
+#define LIBUSB_ERROR_IO          -1
+#define LIBUSB_ERROR_INVALID_PARAM -2
+#define LIBUSB_ERROR_ACCESS      -3
+#define LIBUSB_ERROR_NO_DEVICE   -4
+#define LIBUSB_ERROR_NOT_FOUND   -5
+#define LIBUSB_ERROR_BUSY        -6
+#define LIBUSB_ERROR_TIMEOUT     -7
+#define LIBUSB_ERROR_OVERFLOW    -8
+#define LIBUSB_ERROR_PIPE        -9
+#define LIBUSB_ERROR_INTERRUPTED -10
+#define LIBUSB_ERROR_NO_MEM      -11
+#define LIBUSB_ERROR_NOT_SUPPORTED -12
+#define LIBUSB_ERROR_OTHER       -99
+
 typedef struct libusb_context libusb_context;
 typedef struct libusb_device libusb_device;
 typedef struct libusb_device_handle libusb_device_handle;
