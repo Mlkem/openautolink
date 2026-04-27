@@ -325,16 +325,15 @@ class SessionManager(
             OalMediaBrowserService.updateSessionToken(token)
         }
 
-        // Enable cluster service (AAOS only — on regular Android, CarAppActivity
-        // steals focus from MainActivity and causes display issues)
+        // Cluster service — defer until streaming to avoid CarAppActivity stealing
+        // focus during the connection phase. On real GM AAOS, enabling the component
+        // causes Templates Host to auto-bind, which can push MainActivity to background.
         val isAaos = context?.packageManager?.hasSystemFeature(
             android.content.pm.PackageManager.FEATURE_AUTOMOTIVE) == true
         _clusterManager?.release()
         if (isAaos) {
             _clusterManager = context?.let { com.openautolink.app.cluster.ClusterManager(it) }
-            _clusterManager?.setClusterEnabled(true)
-            // Don't call launchClusterBinding() — let Templates Host discover the service
-            // via intent filter. This avoids CarAppActivity popping up on the main display.
+            // Don't enable yet — will enable when session reaches STREAMING state
         } else {
             OalLog.i(TAG, "Non-AAOS device — cluster service disabled")
             _clusterManager = null
@@ -511,6 +510,19 @@ class SessionManager(
                     startLocationForwarding(session)
                     _vehicleDataForwarder?.start()
                     _imuForwarder?.start()
+                    // Enable cluster component — Templates Host auto-discovers and binds
+                    // via intent filter on real AAOS. No CarAppActivity launch needed;
+                    // that Activity is only a workaround for platforms where Templates Host
+                    // doesn't auto-discover, and it steals focus from MainActivity.
+                    _clusterManager?.setClusterEnabled(true)
+                } else if (newState == SessionState.IDLE) {
+                    // Connection lost — clean up forwarders and cluster
+                    stopDirectLocationForwarding()
+                    _vehicleDataForwarder?.stop()
+                    _imuForwarder?.stop()
+                    _navigationDisplay.clear()
+                    ClusterNavigationState.clear()
+                    _clusterManager?.setClusterEnabled(false)
                 }
             }
         }

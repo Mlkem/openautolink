@@ -212,6 +212,7 @@ class ClusterManager(private val context: Context) {
      * Stop monitoring and release handler callbacks.
      */
     fun release() {
+        setClusterEnabled(false)
         handler.removeCallbacksAndMessages(null)
         healthRetryCount = 0
     }
