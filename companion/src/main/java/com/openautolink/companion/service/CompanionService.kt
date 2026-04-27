@@ -34,11 +34,23 @@ class CompanionService : Service(), NearbyAdvertiser.StateListener {
     private var nearbyAdvertiser: NearbyAdvertiser? = null
     private var tcpAdvertiser: TcpAdvertiser? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var multicastLock: android.net.wifi.WifiManager.MulticastLock? = null
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, createNotification("Starting..."))
+        // Hold multicast lock for mDNS discovery (some OEMs filter multicast when screen off)
+        try {
+            val wm = applicationContext.getSystemService(WIFI_SERVICE) as? android.net.wifi.WifiManager
+            multicastLock = wm?.createMulticastLock("OalCompanion")?.apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+            Log.d(TAG, "MulticastLock acquired")
+        } catch (e: Exception) {
+            Log.w(TAG, "MulticastLock failed: ${e.message}")
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -187,6 +199,10 @@ class CompanionService : Service(), NearbyAdvertiser.StateListener {
         nearbyAdvertiser?.stop()
         tcpAdvertiser?.stop()
         releaseWakeLock()
+        if (multicastLock?.isHeld == true) {
+            multicastLock?.release()
+            Log.d(TAG, "MulticastLock released")
+        }
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -198,8 +214,8 @@ class CompanionService : Service(), NearbyAdvertiser.StateListener {
         private const val CHANNEL_ID = "oal_companion_channel"
         private const val NOTIFICATION_ID = 1
 
-        const val ACTION_START = "ACTION_START"
-        const val ACTION_STOP = "ACTION_STOP"
+        const val ACTION_START = "com.openautolink.companion.ACTION_START"
+        const val ACTION_STOP = "com.openautolink.companion.ACTION_STOP"
 
         /** Observable service state for UI. */
         private val _isRunning = MutableStateFlow(false)

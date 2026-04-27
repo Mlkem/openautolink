@@ -36,6 +36,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         requestMissingPermissions()
+        checkBatteryOptimization()
         handleIntent(intent)
 
         val prefs = getSharedPreferences(CompanionPrefs.NAME, MODE_PRIVATE)
@@ -80,6 +81,27 @@ class MainActivity : ComponentActivity() {
             action = CompanionService.ACTION_STOP
         }
         startService(serviceIntent)
+    }
+
+    private fun checkBatteryOptimization() {
+        val pm = getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Battery Optimization")
+                .setMessage(
+                    "OpenAutoLink Companion needs to run in the background to maintain " +
+                    "the connection to your car. Please disable battery optimization for this app."
+                )
+                .setPositiveButton("Open Settings") { _, _ ->
+                    startActivity(
+                        Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                            data = android.net.Uri.parse("package:$packageName")
+                        }
+                    )
+                }
+                .setNegativeButton("Later", null)
+                .show()
+        }
     }
 
     private fun requestMissingPermissions() {
