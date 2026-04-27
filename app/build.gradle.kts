@@ -20,7 +20,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
-            abiFilters += listOf("arm64-v8a")  // AAOS head units are ARM64
+            abiFilters += listOf("arm64-v8a", "x86_64")  // ARM64 for real AAOS, x86_64 for emulator
         }
 
         externalNativeBuild {

@@ -1,13 +1,15 @@
 #!/bin/bash
-# Build aasdk + protobuf + abseil as static libraries for Android ARM64.
+# Build aasdk + protobuf + abseil as static libraries for Android.
 # Runs entirely on native WSL filesystem for performance, then copies
 # the built .a files + generated headers to the NTFS output dir.
 #
 # Usage:
-#   ./scripts/build-aasdk-android.sh
+#   ./scripts/build-aasdk-android.sh              # ARM64 (default)
+#   ./scripts/build-aasdk-android.sh arm64-v8a    # ARM64
+#   ./scripts/build-aasdk-android.sh x86_64       # x86_64
 #
 # Output:
-#   app/src/main/cpp/third_party/aasdk/arm64-v8a/
+#   app/src/main/cpp/third_party/aasdk/<ABI>/
 #     lib/libaasdk.a
 #     lib/libaap_protobuf.a
 #     lib/libprotobuf.a       (+ abseil libs)
@@ -15,15 +17,30 @@
 
 set -euo pipefail
 
+# ABI from first arg, default arm64-v8a
+TARGET_ABI="${1:-arm64-v8a}"
+case "$TARGET_ABI" in
+    arm64-v8a|x86_64) ;;
+    *)
+        echo "ERROR: Unsupported ABI '$TARGET_ABI'. Use arm64-v8a or x86_64."
+        exit 1
+        ;;
+esac
+echo "Building aasdk for ABI: $TARGET_ABI"
+
+set -euo pipefail
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 AASDK_SOURCE="$REPO_ROOT/external/opencardev-aasdk"
-OUTPUT_DIR="$REPO_ROOT/app/src/main/cpp/third_party/aasdk/arm64-v8a"
-OPENSSL_DIR="$REPO_ROOT/app/src/main/cpp/third_party/openssl/arm64-v8a"
+OUTPUT_DIR="$REPO_ROOT/app/src/main/cpp/third_party/aasdk/$TARGET_ABI"
+OPENSSL_DIR="$REPO_ROOT/app/src/main/cpp/third_party/openssl/$TARGET_ABI"
 BOOST_DIR="$REPO_ROOT/app/src/main/cpp/third_party/boost/include"
 
 # Work entirely on native ext4 for speed
-WORK_DIR="/tmp/oal-aasdk-android-build"
+WORK_DIR="/tmp/oal-aasdk-android-build/$TARGET_ABI"
+# Shared resources (ABI-independent) go in parent dir
+SHARED_DIR="/tmp/oal-aasdk-android-build/shared"
 
 # Detect NDK
 if [ -n "${ANDROID_NDK_HOME:-}" ]; then
@@ -54,7 +71,7 @@ if [ ! -f "$BOOST_DIR/boost/asio.hpp" ]; then
 fi
 
 # Copy aasdk source to native fs (avoid NTFS during build)
-AASDK_NATIVE="$WORK_DIR/aasdk-src"
+AASDK_NATIVE="$SHARED_DIR/aasdk-src"
 if [ ! -f "$AASDK_NATIVE/CMakeLists.txt" ]; then
     echo "Staging aasdk source on native fs..."
     rm -rf "$AASDK_NATIVE"
@@ -66,7 +83,7 @@ else
 fi
 
 # Also copy Boost + OpenSSL to native fs for the build
-BOOST_NATIVE="$WORK_DIR/boost-include"
+BOOST_NATIVE="$SHARED_DIR/boost-include"
 if [ ! -f "$BOOST_NATIVE/boost/asio.hpp" ]; then
     echo "Copying Boost headers to native fs..."
     rm -rf "$BOOST_NATIVE"
@@ -83,13 +100,13 @@ if [ ! -f "$OPENSSL_NATIVE/lib/libssl.a" ]; then
 fi
 
 # Create libusb stub on native fs
-STUB_DIR="$WORK_DIR/stubs"
+STUB_DIR="$SHARED_DIR/stubs"
 mkdir -p "$STUB_DIR"
 cp "$REPO_ROOT/app/src/main/cpp/stubs/libusb.h" "$STUB_DIR/"
 cp "$REPO_ROOT/app/src/main/cpp/stubs/libusb_stub.c" "$STUB_DIR/"
 
 # Create cmake shim dir for find_package overrides
-SHIM_DIR="$WORK_DIR/cmake-shims"
+SHIM_DIR="$SHARED_DIR/cmake-shims"
 mkdir -p "$SHIM_DIR"
 
 cat > "$SHIM_DIR/FindBoost.cmake" << 'SHIMEOF'
@@ -137,7 +154,8 @@ BUILD_DIR="$WORK_DIR/build"
 
 # Step 1: Build host-native aasdk (x86_64).
 # This gives us a working host protoc AND pre-generated protobuf .pb.h/.pb.cc files.
-HOST_BUILD_DIR="$WORK_DIR/host-build"
+# Shared across ABIs — only built once.
+HOST_BUILD_DIR="$SHARED_DIR/host-build"
 HOST_PROTOC="$HOST_BUILD_DIR/bin/protoc"
 if [ ! -f "$HOST_PROTOC" ]; then
     echo ""
@@ -170,9 +188,9 @@ if [ ! -f "$HOST_PROTOC" ]; then
     find "$HOST_BUILD_DIR" -name "libaasdk.a" 2>&1
 fi
 
-# Step 2: Cross-compile aasdk for Android ARM64.
+# Step 2: Cross-compile aasdk for Android.
 echo ""
-echo "=== Configuring aasdk for Android ARM64 (cross-compile) ==="
+echo "=== Configuring aasdk for Android $TARGET_ABI (cross-compile) ==="
 echo ""
 
 rm -rf "$BUILD_DIR"
@@ -181,7 +199,7 @@ cd "$BUILD_DIR"
 
 cmake "$AASDK_NATIVE" \
     -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
-    -DANDROID_ABI=arm64-v8a \
+    -DANDROID_ABI=$TARGET_ABI \
     -DANDROID_PLATFORM=android-$ANDROID_API \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_MODULE_PATH="$SHIM_DIR" \
@@ -281,17 +299,17 @@ echo "Built libraries:"
 ls -la "$PACK_DIR/lib/"
 
 # Pack into tarball and copy to NTFS
-TARBALL="$WORK_DIR/aasdk-android-arm64.tar.gz"
+TARBALL="$WORK_DIR/aasdk-android-$TARGET_ABI.tar.gz"
 (cd "$PACK_DIR" && tar czf "$TARBALL" lib include)
 
 mkdir -p "$OUTPUT_DIR"
 echo "Copying to NTFS..."
-cp "$TARBALL" "$OUTPUT_DIR/../aasdk-android-arm64.tar.gz"
-(cd "$OUTPUT_DIR" && tar xzf "../aasdk-android-arm64.tar.gz")
-rm -f "$OUTPUT_DIR/../aasdk-android-arm64.tar.gz"
+cp "$TARBALL" "$OUTPUT_DIR/../aasdk-android-$TARGET_ABI.tar.gz"
+(cd "$OUTPUT_DIR" && tar xzf "../aasdk-android-$TARGET_ABI.tar.gz")
+rm -f "$OUTPUT_DIR/../aasdk-android-$TARGET_ABI.tar.gz"
 
 echo ""
-echo "=== aasdk Android ARM64 build complete ==="
+echo "=== aasdk Android $TARGET_ABI build complete ==="
 echo "Output: $OUTPUT_DIR/"
 ls -la "$OUTPUT_DIR/lib/"
 echo "Headers: $(find "$OUTPUT_DIR/include" -type f | wc -l) files"

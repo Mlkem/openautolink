@@ -1,17 +1,35 @@
 #!/bin/bash
-# Build OpenSSL 3.x for Android ARM64.
+# Build OpenSSL 3.x for Android (ARM64 or x86_64).
 # Run from WSL or Linux — produces static libraries for the NDK build.
 #
 # Usage:
-#   ./scripts/build-openssl-android.sh
+#   ./scripts/build-openssl-android.sh              # ARM64 (default)
+#   ./scripts/build-openssl-android.sh arm64-v8a    # ARM64
+#   ./scripts/build-openssl-android.sh x86_64       # x86_64
 #
 # Output:
-#   app/src/main/cpp/third_party/openssl/arm64-v8a/
+#   app/src/main/cpp/third_party/openssl/<ABI>/
 #     include/openssl/*.h
 #     lib/libssl.a
 #     lib/libcrypto.a
 
 set -euo pipefail
+
+# ABI from first arg, default arm64-v8a
+TARGET_ABI="${1:-arm64-v8a}"
+case "$TARGET_ABI" in
+    arm64-v8a)
+        OPENSSL_TARGET="android-arm64"
+        ;;
+    x86_64)
+        OPENSSL_TARGET="android-x86_64"
+        ;;
+    *)
+        echo "ERROR: Unsupported ABI '$TARGET_ABI'. Use arm64-v8a or x86_64."
+        exit 1
+        ;;
+esac
+echo "Building OpenSSL for ABI: $TARGET_ABI (target: $OPENSSL_TARGET)"
 
 OPENSSL_VERSION="3.3.2"
 OPENSSL_URL="https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
@@ -32,8 +50,8 @@ echo "Using NDK: $NDK_ROOT"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-BUILD_DIR="/tmp/openssl-android-build"
-OUTPUT_DIR="$REPO_ROOT/app/src/main/cpp/third_party/openssl/arm64-v8a"
+BUILD_DIR="/tmp/openssl-android-build/$TARGET_ABI"
+OUTPUT_DIR="$REPO_ROOT/app/src/main/cpp/third_party/openssl/$TARGET_ABI"
 
 ANDROID_API=32
 TOOLCHAIN="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64"
@@ -56,7 +74,7 @@ cd "openssl-${OPENSSL_VERSION}"
 export ANDROID_NDK_ROOT="$NDK_ROOT"
 export PATH="$TOOLCHAIN/bin:$PATH"
 
-./Configure android-arm64 \
+./Configure $OPENSSL_TARGET \
     -D__ANDROID_API__=$ANDROID_API \
     --prefix="$OUTPUT_DIR" \
     --openssldir="$OUTPUT_DIR/ssl" \
