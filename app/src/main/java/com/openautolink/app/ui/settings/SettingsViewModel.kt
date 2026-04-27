@@ -56,6 +56,9 @@ data class SettingsUiState(
     val volumeOffsetAssistant: Int = AppPreferences.DEFAULT_VOLUME_OFFSET_ASSISTANT,
     // Multi-phone
     val defaultPhoneName: String = AppPreferences.DEFAULT_DEFAULT_PHONE_NAME,
+    // Manual IP (emulator testing)
+    val manualIpEnabled: Boolean = AppPreferences.DEFAULT_MANUAL_IP_ENABLED,
+    val manualIpAddress: String = AppPreferences.DEFAULT_MANUAL_IP_ADDRESS,
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -97,6 +100,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         preferences.volumeOffsetNavigation,
         preferences.volumeOffsetAssistant,
         preferences.defaultPhoneName,
+        preferences.manualIpEnabled,
+        preferences.manualIpAddress,
     ) { values: Array<Any> ->
         SettingsUiState(
             videoAutoNegotiate = values[0] as Boolean,
@@ -130,6 +135,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             volumeOffsetNavigation = values[28] as Int,
             volumeOffsetAssistant = values[29] as Int,
             defaultPhoneName = values[30] as String,
+            manualIpEnabled = values[31] as Boolean,
+            manualIpAddress = values[32] as String,
         )
     }.stateIn(
         viewModelScope,
@@ -306,6 +313,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun updateManualIpEnabled(enabled: Boolean) {
+        viewModelScope.launch { preferences.setManualIpEnabled(enabled) }
+    }
+
+    fun updateManualIpAddress(address: String) {
+        viewModelScope.launch { preferences.setManualIpAddress(address) }
+    }
+
     override fun onCleared() {
         super.onCleared()
     }
@@ -335,6 +350,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             val volMedia = preferences.volumeOffsetMedia.first()
             val volNav = preferences.volumeOffsetNavigation.first()
             val volAssistant = preferences.volumeOffsetAssistant.first()
+            val manualIpEnabled = preferences.manualIpEnabled.first()
+            val manualIp = if (manualIpEnabled) preferences.manualIpAddress.first().takeIf { it.isNotBlank() } else null
             sm.start(
                 codecPreference = codec,
                 micSourcePreference = micSrc,
@@ -356,6 +373,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 volumeOffsetMedia = volMedia,
                 volumeOffsetNavigation = volNav,
                 volumeOffsetAssistant = volAssistant,
+                manualIpAddress = manualIp,
             )
         }
     }

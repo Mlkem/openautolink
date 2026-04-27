@@ -267,6 +267,10 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
             val volNav = preferences.volumeOffsetNavigation.first()
             val volAssistant = preferences.volumeOffsetAssistant.first()
 
+            // Load manual IP for emulator testing
+            val manualIpEnabled = preferences.manualIpEnabled.first()
+            val manualIp = if (manualIpEnabled) preferences.manualIpAddress.first().takeIf { it.isNotBlank() } else null
+
             // Load default phone name for auto-connect
             val defaultPhone = preferences.defaultPhoneName.first()
             sessionManager.setDefaultPhoneName(defaultPhone)
@@ -292,6 +296,7 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
                 volumeOffsetMedia = volMedia,
                 volumeOffsetNavigation = volNav,
                 volumeOffsetAssistant = volAssistant,
+                manualIpAddress = manualIp,
             )
         }
     }

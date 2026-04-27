@@ -37,6 +37,9 @@ class TcpConnector(
         private const val RETRY_DELAY_MS = 3000L
     }
 
+    /** When set, connects only to this IP (skips mDNS and gateway discovery). */
+    var manualIp: String? = null
+
     private var connectJob: Job? = null
     private var nsdManager: NsdManager? = null
     private var discoveryListener: NsdManager.DiscoveryListener? = null
@@ -55,10 +58,22 @@ class TcpConnector(
         isRunning = true
         OalLog.i(TAG, "Starting TCP connector (port $COMPANION_PORT)")
 
-        startNsdDiscovery()
+        val manual = manualIp?.takeIf { it.isNotBlank() }
+        if (manual != null) {
+            OalLog.i(TAG, "Manual IP mode: $manual")
+        } else {
+            startNsdDiscovery()
+        }
 
         connectJob = scope.launch(Dispatchers.IO) {
             while (isActive && isRunning) {
+                // Manual IP — skip all discovery, connect directly
+                if (manual != null) {
+                    if (tryConnect(manual, COMPANION_PORT, "manual")) return@launch
+                    delay(RETRY_DELAY_MS)
+                    continue
+                }
+
                 // Try mDNS-discovered host first
                 val nsdHost = nsdFoundHost
                 if (nsdHost != null && nsdFoundPort > 0) {

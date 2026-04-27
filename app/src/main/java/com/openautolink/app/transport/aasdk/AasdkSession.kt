@@ -82,6 +82,9 @@ class AasdkSession(
     /** Current transport mode: "nearby" or "hotspot" */
     var transportMode: String = "hotspot"
 
+    /** Manual IP address for testing (emulator). Overrides gateway/mDNS discovery. */
+    var manualIpAddress: String? = null
+
     /** True when stop() was called explicitly (user-initiated). False when session died on its own. */
     @Volatile
     private var explicitStop = false
@@ -123,6 +126,7 @@ class AasdkSession(
                 handleConnection(tcpSocket)
             }
         }
+        _tcpConnector?.manualIp = manualIpAddress
         _tcpConnector?.start()
     }
 

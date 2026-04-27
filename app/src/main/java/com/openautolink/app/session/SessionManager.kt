@@ -232,6 +232,7 @@ class SessionManager(
         volumeOffsetMedia: Int = 0,
         volumeOffsetNavigation: Int = 0,
         volumeOffsetAssistant: Int = 0,
+        manualIpAddress: String? = null,
     ) {
         micSource = micSourcePreference
         observeJob?.cancel()
@@ -365,7 +366,8 @@ class SessionManager(
             startSession(directTransport, hotspotSsid, hotspotPassword,
                 videoAutoNegotiate, codecPreference, aaResolution, aaDpi,
                 aaWidthMargin, aaHeightMargin, aaPixelAspect, videoFps,
-                driveSide, hideClock, hideSignal, hideBattery, scalingMode)
+                driveSide, hideClock, hideSignal, hideBattery, scalingMode,
+                manualIpAddress)
         }
     }
 
@@ -377,6 +379,7 @@ class SessionManager(
         driveSide: String = "left",
         hideClock: Boolean = false, hideSignal: Boolean = false, hideBattery: Boolean = false,
         scalingMode: String = "letterbox",
+        manualIpAddress: String? = null,
     ) {
         aasdkSession?.stop()
         _transportMode.value = directTransport
@@ -452,6 +455,7 @@ class SessionManager(
 
         val session = AasdkSession(scope, ctx)
         session.transportMode = directTransport
+        session.manualIpAddress = manualIpAddress
         session.sdrConfig = AasdkSdrConfig(
             videoWidth = resW,
             videoHeight = resH,

@@ -45,6 +45,8 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
         val HOTSPOT_SSID = stringPreferencesKey("hotspot_ssid")
         val HOTSPOT_PASSWORD = stringPreferencesKey("hotspot_password")
         val DIRECT_TRANSPORT = stringPreferencesKey("direct_transport")
+        val MANUAL_IP_ENABLED = booleanPreferencesKey("manual_ip_enabled")
+        val MANUAL_IP_ADDRESS = stringPreferencesKey("manual_ip_address")
         val AA_RESOLUTION = stringPreferencesKey("aa_resolution")
         val AA_DPI = intPreferencesKey("aa_dpi")
         val AA_WIDTH_MARGIN = intPreferencesKey("aa_width_margin")
@@ -97,6 +99,8 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
         const val DEFAULT_HOTSPOT_SSID = ""
         const val DEFAULT_HOTSPOT_PASSWORD = ""
         const val DEFAULT_DIRECT_TRANSPORT = "hotspot" // "nearby", "hotspot"
+        const val DEFAULT_MANUAL_IP_ENABLED = false
+        const val DEFAULT_MANUAL_IP_ADDRESS = ""
         const val DEFAULT_AA_RESOLUTION = "1080p" // "480p", "720p", "1080p", "1440p", "4k"
         const val DEFAULT_AA_DPI = 160
         const val DEFAULT_AA_WIDTH_MARGIN = 0
@@ -181,6 +185,14 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
         prefs[DIRECT_TRANSPORT] ?: DEFAULT_DIRECT_TRANSPORT
     }
 
+    val manualIpEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[MANUAL_IP_ENABLED] ?: DEFAULT_MANUAL_IP_ENABLED
+    }
+
+    val manualIpAddress: Flow<String> = dataStore.data.map { prefs ->
+        prefs[MANUAL_IP_ADDRESS] ?: DEFAULT_MANUAL_IP_ADDRESS
+    }
+
     val aaResolution: Flow<String> = dataStore.data.map { prefs ->
         prefs[AA_RESOLUTION] ?: DEFAULT_AA_RESOLUTION
     }
@@ -259,6 +271,14 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
 
     suspend fun setDirectTransport(transport: String) {
         dataStore.edit { it[DIRECT_TRANSPORT] = transport }
+    }
+
+    suspend fun setManualIpEnabled(enabled: Boolean) {
+        dataStore.edit { it[MANUAL_IP_ENABLED] = enabled }
+    }
+
+    suspend fun setManualIpAddress(address: String) {
+        dataStore.edit { it[MANUAL_IP_ADDRESS] = address }
     }
 
     suspend fun setAaResolution(resolution: String) {

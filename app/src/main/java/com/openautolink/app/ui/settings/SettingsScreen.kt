@@ -29,7 +29,10 @@ import androidx.compose.material.icons.filled.Router
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VideoSettings
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
@@ -349,6 +352,74 @@ private fun ConnectionTab(viewModel: SettingsViewModel, uiState: SettingsUiState
         // --- Hotspot Credentials removed ---
         // TCP transport connects to phone's WiFi gateway automatically.
         // User connects to the phone's hotspot via Android WiFi settings.
+
+        // --- Manual IP (emulator/testing) ---
+        if (uiState.directTransport == "hotspot") {
+            HorizontalDivider(modifier = Modifier.fillMaxWidth(0.5f))
+            Spacer(modifier = Modifier.height(16.dp))
+            SectionHeader("Manual IP Address")
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = uiState.manualIpEnabled,
+                    onCheckedChange = { viewModel.updateManualIpEnabled(it) },
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "Specify companion IP manually",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
+
+            Text(
+                text = "For testing environments only (e.g., AAOS emulator on a PC). " +
+                        "In normal use, the car and phone find each other automatically via the hotspot gateway.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+
+            if (uiState.manualIpEnabled) {
+                Spacer(modifier = Modifier.height(8.dp))
+
+                val isValidIp = remember(uiState.manualIpAddress) {
+                    uiState.manualIpAddress.isBlank() || isValidIpv4(uiState.manualIpAddress)
+                }
+
+                OutlinedTextField(
+                    value = uiState.manualIpAddress,
+                    onValueChange = { input ->
+                        // Allow only digits and dots
+                        val filtered = input.filter { it.isDigit() || it == '.' }
+                        viewModel.updateManualIpAddress(filtered)
+                    },
+                    label = { Text("Phone IP Address") },
+                    placeholder = { Text("e.g. 192.168.1.100") },
+                    singleLine = true,
+                    isError = !isValidIp,
+                    supportingText = if (!isValidIp) {
+                        { Text("Enter a valid IPv4 address (e.g. 192.168.1.100)") }
+                    } else null,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier
+                        .fillMaxWidth(0.5f)
+                        .padding(horizontal = 16.dp),
+                )
+                Text(
+                    text = "The IP address of the phone running the companion app. " +
+                            "Requires Save & Restart to take effect.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
     }
 }
 
@@ -1726,5 +1797,15 @@ private fun DiagnosticsSettingsTab(
             Spacer(modifier = Modifier.width(8.dp))
             Text("Open Diagnostics Dashboard")
         }
+    }
+}
+
+/** Validate IPv4 address: 4 octets, each 0–255. */
+private fun isValidIpv4(ip: String): Boolean {
+    val parts = ip.split(".")
+    if (parts.size != 4) return false
+    return parts.all { part ->
+        val n = part.toIntOrNull() ?: return false
+        n in 0..255 && part == n.toString() // rejects leading zeros like "01"
     }
 }
