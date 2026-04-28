@@ -98,7 +98,7 @@ class AppPreferences private constructor(private val dataStore: DataStore<Prefer
         const val DEFAULT_VIDEO_SCALING_MODE = "crop" // "letterbox" or "crop"
         const val DEFAULT_HOTSPOT_SSID = ""
         const val DEFAULT_HOTSPOT_PASSWORD = ""
-        const val DEFAULT_DIRECT_TRANSPORT = "hotspot" // "nearby", "hotspot"
+        const val DEFAULT_DIRECT_TRANSPORT = "hotspot" // "nearby", "hotspot", "usb"
         const val DEFAULT_MANUAL_IP_ENABLED = false
         const val DEFAULT_MANUAL_IP_ADDRESS = ""
         const val DEFAULT_AA_RESOLUTION = "1080p" // "480p", "720p", "1080p", "1440p", "4k"

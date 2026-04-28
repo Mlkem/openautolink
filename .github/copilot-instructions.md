@@ -127,6 +127,7 @@ See [bridge/sbc/BUILD.md](bridge/sbc/BUILD.md) for SBC setup. CI builds via `.gi
 > Video may drop. Audio may buffer. Neither may block the other.
 > On reconnect: flush decoder, discard stale buffers, wait for IDR before rendering. No artifact frames.
 > Keep codec and AudioTracks pre-warmed where possible — minimize time from TCP connect to first rendered frame.
+> **Aspect ratio**: Use `width_margin` (wide displays) or `height_margin` (tall displays) in the SDR to match the display AR. Do NOT use `pixel_aspect_ratio_e4` — the phone ignores it. Do NOT rely on `MediaCodec.setVideoScalingMode()` — Qualcomm decoders ignore it. See `.github/instructions/pixel-aspect.instructions.md` for full details.
 
 ### Code Patterns
 - **Island independence**: Each component island has its own package, public interface, and test suite. Islands communicate through the session orchestrator, not directly
@@ -161,7 +162,7 @@ See [bridge/sbc/BUILD.md](bridge/sbc/BUILD.md) for SBC setup. CI builds via `.gi
 | [docs/networking.md](docs/networking.md) | Three-network architecture (bridge-mode only) |
 | [bridge/sbc/BUILD.md](bridge/sbc/BUILD.md) | SBC build and deployment guide (bridge-mode only) |
 | [docs/bridge-update.md](docs/bridge-update.md) | Bridge OTA update system — as-built design, flow, security |
-| [docs/testing.md](docs/testing.md) | Local testing with AAOS emulator + SBC |
+| [docs/testing.md](docs/testing.md) | Local testing with AAOS emulator + SBC + remote diagnostics |
 ## Pitfalls
 
 - **CRLF**: Shell scripts must be LF (enforced via `.gitattributes eol=lf`). Windows `scp` from PowerShell injects CRLF. **`sed`, `tr`, and `perl` over SSH from PowerShell cannot fix this** — PowerShell re-injects `\r` into escape sequences. Use the Python binary-I/O method in [bridge/sbc/BUILD.md](bridge/sbc/BUILD.md#manually-copying-files-from-windows). The `deploy-bridge.ps1` script handles this automatically.
@@ -169,3 +170,4 @@ See [bridge/sbc/BUILD.md](bridge/sbc/BUILD.md) for SBC setup. CI builds via `.gi
 - **BlueZ SAP plugin** (bridge-mode only): Steals RFCOMM channel 8. Disable with `--noplugin=sap`
 - **MediaCodec lifecycle**: Must release codec on pause, recreate on resume. Surface changes require full codec reset
 - **AudioTrack purpose routing**: See [docs/embedded-knowledge.md](docs/embedded-knowledge.md) — the 5-slot decode_type/audioType matching is non-obvious
+- **No ADB on GM cars**: GM locks ADB on production head units. Use the app's built-in Remote Log Server (TCP port 6555) for live log streaming from a laptop on the same network. See [docs/testing.md](docs/testing.md#10-remote-diagnostics-no-adb-required)

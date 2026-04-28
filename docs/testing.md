@@ -501,6 +501,120 @@ sudo journalctl -u openautolink.service -f
 
 This is why emulator testing handles the bulk of development — it's the only environment with full `adb` access for rapid iteration. In-car testing validates what the emulator can't.
 
+## 10. Remote Diagnostics (No ADB Required)
+
+Since GM locks ADB on the production head unit, the app has built-in remote diagnostics tools that work over TCP — no USB cable, no ADB, no root. Everything runs over the phone's hotspot network (phone + car + laptop all connected).
+
+### Remote Log Server
+
+The app can stream its entire log output over TCP to your laptop in real-time. This replaces `adb logcat` when ADB is unavailable.
+
+#### Setup
+
+1. On the car head unit: **OpenAutoLink → Settings → Diagnostics → Open Diagnostics Dashboard**
+2. Go to the **Debug** tab
+3. Tap **Start Log Server** — status shows `Listening on <car-ip>:6555`
+4. Note the car's IP (also shown in the **Network** tab under Interfaces)
+
+#### Connect from Laptop
+
+All devices must be on the same network (phone's hotspot).
+
+**PowerShell (Windows — no extra tools):**
+```powershell
+$client = [System.Net.Sockets.TcpClient]::new("<car-ip>", 6555)
+$reader = [System.IO.StreamReader]::new($client.GetStream())
+while ($null -ne ($line = $reader.ReadLine())) { Write-Host $line }
+```
+
+**ncat (if Nmap is installed):**
+```powershell
+ncat <car-ip> 6555
+```
+
+**WSL / Linux:**
+```bash
+nc <car-ip> 6555
+```
+
+#### What You Get
+
+On connect, the server dumps all **buffered entries** (up to 500 from the ring buffer), then live-tails every new log line:
+
+```
+=== OpenAutoLink Remote Log Server ===
+=== Connected: Sun Apr 27 14:32:01 PDT 2026 ===
+=== Dumping 127 buffered entries ===
+
+14:30:01.234 I/SessionManager: Session state → IDLE
+14:30:02.456 I/NearbyTransport: Advertising started
+...
+
+=== Live tail (new entries streamed in real-time) ===
+
+14:32:05.789 I/VideoDecoder: First frame decoded (H264, 1920x1080)
+14:32:05.801 D/AudioPlayer: Media track started, purpose=1
+```
+
+#### Details
+
+- Port: **6555** (TCP)
+- Supports **multiple simultaneous clients**
+- Logs include the same entries visible in Diagnostics → Logs tab (everything via `OalLog`)
+- The server runs while the DiagnosticsViewModel is alive — it stops when you leave the diagnostics screen
+- The Debug tab shows connected client count and connection log
+
+### Network Port Scanner
+
+The **Network** tab includes a port scanner that probes all reachable hosts for open services.
+
+#### What It Scans
+
+- **Hosts:** localhost (`127.0.0.1`), all interface IPs, inferred gateways (last octet `.1`), and any manually-entered ping target
+- **Ports:** 30+ common services including ADB (5037/5555–5559/7555), HTTP, SSH, VNC, Chrome DevTools, OAL ports, and more
+- Each open port shows latency and attempts to read a banner
+
+This is useful for discovering whether ADB TCP might be running on a non-standard port, or what other services the head unit exposes.
+
+### ADB / Debug Probe
+
+The **Debug** tab provides deeper inspection of the device's debug capabilities:
+
+| Feature | What It Does |
+|---------|-------------|
+| **ADB Port Scan** | Scans localhost for ADB-specific ports (5037, 5555–5559, 7555) with banner detection |
+| **Debug Properties** | Runs `getprop` and filters for ADB, USB, debug, and GM-specific system properties |
+| **Settings.Global** | Reads `ADB_ENABLED` and `adb_wifi_enabled` from Android settings |
+| **Device Identity** | Shows manufacturer, model, SOC, build fingerprint, build type |
+| **Developer Settings Launcher** | Probes 9 different intents for developer/settings activities and shows which exist on the device. Available intents get a **Launch** button |
+
+#### Developer Settings Intents Probed
+
+| Intent | Purpose |
+|--------|---------|
+| Android Developer Options | Standard `ACTION_APPLICATION_DEVELOPMENT_SETTINGS` |
+| Developer Options (component) | Direct `DevelopmentSettings` activity |
+| Dev Options (SubSettings) | Fragment-based `DevelopmentSettingsDashboardFragment` |
+| GM Developer Settings | `com.gm.settings.DeveloperSettingsActivity` |
+| GM System Settings | `com.gm.settings.SystemSettingsActivity` |
+| Android Settings (main) | General `ACTION_SETTINGS` |
+| About (tap build number 7x) | `ACTION_DEVICE_INFO_SETTINGS` — navigate here to enable developer mode |
+| Wireless Debugging | `WIRELESS_DEBUGGING_SETTINGS` (Android 11+) |
+| USB Preferences | `UsbDetailsActivity` — USB debugging configuration |
+
+> **Tip:** If the OEM's developer settings only show USB debugging, try the "About" intent to navigate to the build number — tapping it 7 times enables Android developer mode on most devices.
+
+### Finding the Car's IP
+
+If you don't know the car's IP on the hotspot:
+
+```powershell
+# From your laptop — scan the hotspot subnet
+arp -a
+```
+
+Or check the app's **Diagnostics → Network** tab — it lists all network interface IPs.
+
 ## Troubleshooting
 
 | Problem | Cause | Fix |

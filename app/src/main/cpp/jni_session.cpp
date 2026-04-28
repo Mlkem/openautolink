@@ -896,7 +896,6 @@ void JniSession::buildServiceDiscoveryResponse(
               if (sdrConfig_.marginWidth > 0) vc->set_width_margin(sdrConfig_.marginWidth);
               if (sdrConfig_.marginHeight > 0) vc->set_height_margin(sdrConfig_.marginHeight);
               if (sdrConfig_.pixelAspectE4 > 0) vc->set_pixel_aspect_ratio_e4(sdrConfig_.pixelAspectE4);
-              if (sdrConfig_.realDensity > 0) vc->set_real_density(sdrConfig_.realDensity);
           }
           for (int t : {3, 2, 1}) {
               auto* vc = ms->add_video_configs();
@@ -907,7 +906,6 @@ void JniSession::buildServiceDiscoveryResponse(
               if (sdrConfig_.marginWidth > 0) vc->set_width_margin(sdrConfig_.marginWidth);
               if (sdrConfig_.marginHeight > 0) vc->set_height_margin(sdrConfig_.marginHeight);
               if (sdrConfig_.pixelAspectE4 > 0) vc->set_pixel_aspect_ratio_e4(sdrConfig_.pixelAspectE4);
-              if (sdrConfig_.realDensity > 0) vc->set_real_density(sdrConfig_.realDensity);
           }
       } else {
           // Manual mode: single config at the selected resolution and codec
@@ -922,7 +920,6 @@ void JniSession::buildServiceDiscoveryResponse(
           if (sdrConfig_.marginWidth > 0) vc->set_width_margin(sdrConfig_.marginWidth);
           if (sdrConfig_.marginHeight > 0) vc->set_height_margin(sdrConfig_.marginHeight);
           if (sdrConfig_.pixelAspectE4 > 0) vc->set_pixel_aspect_ratio_e4(sdrConfig_.pixelAspectE4);
-          if (sdrConfig_.realDensity > 0) vc->set_real_density(sdrConfig_.realDensity);
       }
     }
 
@@ -1067,11 +1064,10 @@ void JniSession::buildServiceDiscoveryResponse(
                  (int)ms.available_while_in_call());
             for (int v = 0; v < ms.video_configs_size(); v++) {
                 const auto& vc = ms.video_configs(v);
-                LOGI("    vc[%d] res=%d fps=%d dpi=%d codec=%d pixel_aspect=%d real_dpi=%d",
+                LOGI("    vc[%d] res=%d fps=%d dpi=%d codec=%d pixel_aspect=%d",
                      v, (int)vc.codec_resolution(), (int)vc.frame_rate(),
                      vc.density(), (int)vc.video_codec_type(),
-                     vc.has_pixel_aspect_ratio_e4() ? vc.pixel_aspect_ratio_e4() : 0,
-                     vc.has_real_density() ? vc.real_density() : 0);
+                     vc.has_pixel_aspect_ratio_e4() ? vc.pixel_aspect_ratio_e4() : 0);
             }
         } else if (ch.has_media_source_service()) {
             LOGI("  ch[%d] id=%d media_source: avail_type=%d", i, ch.id(),

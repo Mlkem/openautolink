@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ActivityInfo
-import android.content.res.Configuration
 import android.os.Bundle
 import android.util.Log
 import android.view.KeyEvent
@@ -20,7 +19,6 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import com.openautolink.app.data.AppPreferences
-import com.openautolink.app.session.SessionState
 import com.openautolink.app.ui.navigation.AppNavHost
 import com.openautolink.app.ui.projection.ProjectionViewModel
 import com.openautolink.app.ui.theme.OpenAutoLinkTheme
@@ -81,27 +79,9 @@ class MainActivity : ComponentActivity() {
         // Keep screen on during projection
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        // Lock orientation when streaming starts — AA is designed for the
-        // orientation at session start. Unlock when session stops so the
-        // user can rotate freely in settings/idle.
-        lifecycleScope.launch {
-            com.openautolink.app.session.SessionManager.instanceOrNull()
-                ?.sessionState?.collectLatest { state ->
-                    if (state == SessionState.STREAMING) {
-                        // Lock to current orientation
-                        requestedOrientation = when (resources.configuration.orientation) {
-                            Configuration.ORIENTATION_LANDSCAPE ->
-                                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                            else ->
-                                ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
-                        }
-                        Log.i("MainActivity", "Orientation locked (streaming)")
-                    } else if (state == SessionState.IDLE) {
-                        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_USER
-                        Log.i("MainActivity", "Orientation unlocked (idle)")
-                    }
-                }
-        }
+        // Hardcode landscape — AA is always landscape on car head units.
+        // The manifest sets sensorLandscape, this is belt-and-suspenders.
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
 
         setContent {
             OpenAutoLinkTheme {

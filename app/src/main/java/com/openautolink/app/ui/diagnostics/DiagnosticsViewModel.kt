@@ -17,6 +17,7 @@ import com.openautolink.app.video.VideoStats
 import com.openautolink.app.audio.AudioStats
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -109,6 +110,26 @@ data class CarInfo(
     val propertyStatus: Map<String, String> = emptyMap(),
 )
 
+data class DebugProbeState(
+    val portScanResults: List<com.openautolink.app.diagnostics.DeviceDebugProbe.PortScanResult> = emptyList(),
+    val portScanInProgress: Boolean = false,
+    val debugProps: com.openautolink.app.diagnostics.DeviceDebugProbe.DebugProperties? = null,
+    val propsLoading: Boolean = false,
+    val adbWifiStatus: String = "",
+    val deviceInfo: Map<String, String> = emptyMap(),
+    val logServerRunning: Boolean = false,
+    val logServerClients: Int = 0,
+    val logServerLog: List<String> = emptyList(),
+    val intentResults: List<Pair<String, Boolean>> = emptyList(),
+    // Reverse ADB tunnel
+    val tunnel: com.openautolink.app.diagnostics.ReverseTunnel.TunnelState =
+        com.openautolink.app.diagnostics.ReverseTunnel.TunnelState(),
+    // USB devices
+    val usbDevices: List<com.openautolink.app.diagnostics.DeviceDebugProbe.UsbDeviceInfo> = emptyList(),
+    val sysfsDevices: List<Map<String, String>> = emptyList(),
+    val usbScanDone: Boolean = false,
+)
+
 data class DiagnosticsUiState(
     val system: SystemInfo = SystemInfo(
         androidVersion = "", sdkLevel = 0, device = "", manufacturer = "", model = "", soc = "",
@@ -125,9 +146,19 @@ data class DiagnosticsUiState(
     val logs: List<LogEntry> = emptyList(),
     val logFilter: LogSeverity = LogSeverity.DEBUG,
     val networkProbe: NetworkProbeState = NetworkProbeState(),
+    val debugProbe: DebugProbeState = DebugProbeState(),
 )
 
 data class InterfaceInfo(val name: String, val ip: String)
+
+data class PortScanEntry(
+    val host: String,
+    val port: Int,
+    val label: String,
+    val open: Boolean,
+    val latencyMs: Long? = null,
+    val banner: String? = null,
+)
 
 data class NetworkProbeState(
     val interfaces: List<InterfaceInfo> = emptyList(),
@@ -137,6 +168,17 @@ data class NetworkProbeState(
     val tcpListenerActive: Boolean = false,
     val tcpListenerPort: Int = 5288,
     val tcpListenerLog: List<String> = emptyList(),
+    // Port scanner
+    val portScanRunning: Boolean = false,
+    val portScanProgress: String = "",
+    val portScanResults: List<PortScanEntry> = emptyList(),
+)
+
+private data class CombinedInner(
+    val logs: List<com.openautolink.app.diagnostics.LocalLogEntry>,
+    val filter: LogSeverity,
+    val probe: NetworkProbeState,
+    val debug: DebugProbeState,
 )
 
 class DiagnosticsViewModel(application: Application) : AndroidViewModel(application) {
@@ -156,8 +198,15 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
     private val _car = MutableStateFlow(CarInfo())
     private val _logFilter = MutableStateFlow(LogSeverity.DEBUG)
     private val _networkProbe = MutableStateFlow(NetworkProbeState())
+    private val _debugProbe = MutableStateFlow(DebugProbeState())
     private var tcpListenerJob: Job? = null
     private var tcpServerSocket: ServerSocket? = null
+
+    // Remote log server for TCP streaming — singleton, survives screen navigation
+    private val remoteLogServer = com.openautolink.app.diagnostics.RemoteLogServer.instance
+
+    // Reverse ADB tunnel — singleton, survives screen navigation
+    private val reverseTunnel = com.openautolink.app.diagnostics.ReverseTunnel.instance
 
     val uiState: StateFlow<DiagnosticsUiState> = combine(
         _system,
@@ -168,10 +217,13 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
             com.openautolink.app.diagnostics.DiagnosticLog.localLogs,
             _logFilter,
             _networkProbe,
-        ) { logs, filter, probe -> Triple(logs, filter, probe) },
-    ) { system, network, streaming, car, (localEntries, filter, probe) ->
+            _debugProbe,
+        ) { logs, filter, probe, debug ->
+            CombinedInner(logs, filter, probe, debug)
+        },
+    ) { system, network, streaming, car, inner ->
         // Map LocalLogEntry → LogEntry for UI
-        val logs = localEntries.map { entry ->
+        val logs = inner.logs.map { entry ->
             LogEntry(
                 timestamp = entry.timestamp,
                 severity = when (entry.level) {
@@ -184,16 +236,17 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
                 message = entry.message,
             )
         }
-        val filtered = if (filter == LogSeverity.DEBUG) logs
-        else logs.filter { it.severity >= filter }
+        val filtered = if (inner.filter == LogSeverity.DEBUG) logs
+        else logs.filter { it.severity >= inner.filter }
         DiagnosticsUiState(
             system = system,
             network = network,
             streaming = streaming,
             car = car,
             logs = filtered,
-            logFilter = filter,
-            networkProbe = probe,
+            logFilter = inner.filter,
+            networkProbe = inner.probe,
+            debugProbe = inner.debug,
         )
     }.stateIn(
         viewModelScope,
@@ -280,6 +333,36 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
 
         // Populate network interfaces on open
         refreshInterfaces()
+
+        // Pre-populate debug probe info
+        _debugProbe.value = _debugProbe.value.copy(
+            adbWifiStatus = com.openautolink.app.diagnostics.DeviceDebugProbe.getAdbWifiStatus(application),
+            deviceInfo = com.openautolink.app.diagnostics.DeviceDebugProbe.getDeviceInfo(),
+        )
+
+        // Observe remote log server state
+        viewModelScope.launch {
+            remoteLogServer.isRunning.collect { running ->
+                _debugProbe.value = _debugProbe.value.copy(logServerRunning = running)
+            }
+        }
+        viewModelScope.launch {
+            remoteLogServer.clientCount.collect { count ->
+                _debugProbe.value = _debugProbe.value.copy(logServerClients = count)
+            }
+        }
+        viewModelScope.launch {
+            remoteLogServer.statusLog.collect { log ->
+                _debugProbe.value = _debugProbe.value.copy(logServerLog = log)
+            }
+        }
+
+        // Observe reverse tunnel state
+        viewModelScope.launch {
+            reverseTunnel.state.collect { tunnelState ->
+                _debugProbe.value = _debugProbe.value.copy(tunnel = tunnelState)
+            }
+        }
     }
 
     // ── Network Probe ─────────────────────────────────────────────────
@@ -404,6 +487,151 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
         )
     }
 
+    // ── Port Scanner ────────────────────────────────────────────────
+
+    private var portScanJob: Job? = null
+
+    fun startPortScan() {
+        if (_networkProbe.value.portScanRunning) return
+        _networkProbe.value = _networkProbe.value.copy(
+            portScanRunning = true,
+            portScanProgress = "Starting scan...",
+            portScanResults = emptyList(),
+        )
+
+        portScanJob = viewModelScope.launch(Dispatchers.IO) {
+            val results = mutableListOf<PortScanEntry>()
+
+            // Build target list: localhost + all interface gateways + any manually entered IP
+            val targets = mutableListOf<Pair<String, String>>() // (ip, label)
+            targets.add("127.0.0.1" to "localhost")
+
+            // Add all interface IPs (for scanning services bound to specific interfaces)
+            val ifaces = _networkProbe.value.interfaces
+            for (iface in ifaces) {
+                if (iface.ip != "127.0.0.1") {
+                    targets.add(iface.ip to "self (${iface.name})")
+                    // Guess gateway: replace last octet with .1
+                    val gateway = iface.ip.substringBeforeLast('.') + ".1"
+                    if (gateway != iface.ip) {
+                        targets.add(gateway to "gateway (${iface.name})")
+                    }
+                }
+            }
+
+            // If user has a ping target entered, scan that too
+            val userTarget = _networkProbe.value.pingTarget.trim()
+            if (userTarget.isNotEmpty() && targets.none { it.first == userTarget }) {
+                targets.add(userTarget to "manual")
+            }
+
+            // Ports to scan — common services + ADB + debug ports
+            val ports = listOf(
+                21 to "FTP",
+                22 to "SSH",
+                23 to "Telnet",
+                53 to "DNS",
+                80 to "HTTP",
+                443 to "HTTPS",
+                554 to "RTSP",
+                3389 to "RDP",
+                4000 to "Debug",
+                4200 to "Debug",
+                4500 to "IPSec",
+                5000 to "HTTP-alt",
+                5037 to "ADB server",
+                5040 to "ADB-alt",
+                5228 to "GCM",
+                5288 to "OAL AA",
+                5432 to "PostgreSQL",
+                5555 to "ADB TCP",
+                5556 to "ADB TCP-alt",
+                5557 to "ADB TCP-alt2",
+                5558 to "ADB TCP-alt3",
+                5559 to "ADB TCP-alt4",
+                5900 to "VNC",
+                6000 to "X11",
+                6555 to "OAL LogSrv",
+                7555 to "ADB WiFi",
+                8080 to "HTTP-proxy",
+                8443 to "HTTPS-alt",
+                8888 to "HTTP-alt2",
+                9000 to "Debug",
+                9090 to "Debug2",
+                9222 to "Chrome DevTools",
+                27042 to "Frida",
+                62078 to "iproxy",
+            )
+
+            val total = targets.size * ports.size
+            var done = 0
+
+            for ((host, hostLabel) in targets) {
+                // Parallelize ports per host using coroutines
+                val perHost = mutableListOf<PortScanEntry>()
+                ports.chunked(20).forEach { batch ->
+                    val deferred = batch.map { (port, label) ->
+                        async(Dispatchers.IO) {
+                            scanPort(host, hostLabel, port, label)
+                        }
+                    }
+                    perHost.addAll(deferred.map { it.await() })
+                    done += batch.size
+                    _networkProbe.value = _networkProbe.value.copy(
+                        portScanProgress = "Scanning $host... ($done/$total)"
+                    )
+                }
+                results.addAll(perHost)
+                // Update results incrementally so user sees progress
+                _networkProbe.value = _networkProbe.value.copy(
+                    portScanResults = results.toList(),
+                )
+            }
+
+            val openCount = results.count { it.open }
+            _networkProbe.value = _networkProbe.value.copy(
+                portScanRunning = false,
+                portScanProgress = "Done — $openCount open ports found across ${targets.size} hosts",
+                portScanResults = results.toList(),
+            )
+        }
+    }
+
+    fun stopPortScan() {
+        portScanJob?.cancel()
+        portScanJob = null
+        _networkProbe.value = _networkProbe.value.copy(
+            portScanRunning = false,
+            portScanProgress = "Scan cancelled",
+        )
+    }
+
+    private fun scanPort(host: String, hostLabel: String, port: Int, label: String): PortScanEntry {
+        return try {
+            val socket = Socket()
+            val start = System.currentTimeMillis()
+            socket.connect(InetSocketAddress(host, port), 300)
+            val elapsed = System.currentTimeMillis() - start
+            // Try reading a banner
+            val banner = try {
+                socket.soTimeout = 200
+                val buf = ByteArray(128)
+                val n = socket.getInputStream().read(buf)
+                if (n > 0) {
+                    String(buf, 0, n, Charsets.UTF_8)
+                        .replace("\r", "")
+                        .replace("\n", " ")
+                        .take(80)
+                        .trim()
+                } else null
+            } catch (_: Exception) { null }
+            socket.close()
+            PortScanEntry(host, port, "$label ($hostLabel)", open = true, latencyMs = elapsed, banner = banner)
+        } catch (_: Exception) {
+            PortScanEntry(host, port, "$label ($hostLabel)", open = false)
+        }
+    }
+
     // ── Log Filter ──────────────────────────────────────────────────
 
     fun setLogFilter(severity: LogSeverity) {
@@ -414,9 +642,114 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
         com.openautolink.app.diagnostics.DiagnosticLog.clearLocal()
     }
 
+    // ── Debug Probe ─────────────────────────────────────────────────
+
+    fun toggleLogServer() {
+        if (remoteLogServer.isRunning.value) {
+            remoteLogServer.stop()
+            com.openautolink.app.diagnostics.DiagnosticLog.remoteLogServer = null
+        } else {
+            com.openautolink.app.diagnostics.DiagnosticLog.remoteLogServer = remoteLogServer
+            remoteLogServer.start()
+        }
+    }
+
+    fun connectLogServerOutbound(host: String, port: Int = 6555) {
+        if (remoteLogServer.isRunning.value) {
+            remoteLogServer.stop()
+            com.openautolink.app.diagnostics.DiagnosticLog.remoteLogServer = null
+        } else {
+            com.openautolink.app.diagnostics.DiagnosticLog.remoteLogServer = remoteLogServer
+            remoteLogServer.connectOutbound(host, port)
+        }
+    }
+
+    fun scanAdbPorts() {
+        _debugProbe.value = _debugProbe.value.copy(portScanInProgress = true)
+        viewModelScope.launch {
+            val results = com.openautolink.app.diagnostics.DeviceDebugProbe.scanAdbPorts()
+            _debugProbe.value = _debugProbe.value.copy(
+                portScanResults = results,
+                portScanInProgress = false,
+            )
+        }
+    }
+
+    fun loadDebugProperties() {
+        _debugProbe.value = _debugProbe.value.copy(propsLoading = true)
+        viewModelScope.launch {
+            val props = com.openautolink.app.diagnostics.DeviceDebugProbe.getDebugProperties()
+            _debugProbe.value = _debugProbe.value.copy(
+                debugProps = props,
+                propsLoading = false,
+            )
+        }
+    }
+
+    fun tryLaunchDevSettings(description: String, intent: android.content.Intent) {
+        val context = getApplication<Application>()
+        val success = com.openautolink.app.diagnostics.DeviceDebugProbe.tryLaunchIntent(context, intent)
+        val current = _debugProbe.value.intentResults
+        _debugProbe.value = _debugProbe.value.copy(
+            intentResults = current + (description to success)
+        )
+    }
+
+    fun probeAllDevSettingsIntents() {
+        val context = getApplication<Application>()
+        val intents = com.openautolink.app.diagnostics.DeviceDebugProbe.getDeveloperSettingsIntents()
+        val results = intents.map { (desc, intent) ->
+            val canResolve = try {
+                intent.resolveActivity(context.packageManager) != null
+            } catch (_: Exception) { false }
+            desc to canResolve
+        }
+        _debugProbe.value = _debugProbe.value.copy(intentResults = results)
+    }
+
+    // ── Reverse ADB Tunnel ─────────────────────────────────────────
+
+    fun startTunnel(relayHost: String, relayPort: Int = 6556, localPort: Int = 5555) {
+        reverseTunnel.start(relayHost, relayPort, localPort)
+    }
+
+    fun stopTunnel() {
+        reverseTunnel.stop()
+    }
+
+    fun tryEnableAdbTcp() {
+        val context = getApplication<Application>()
+        viewModelScope.launch {
+            val log = com.openautolink.app.diagnostics.DeviceDebugProbe.tryEnableAdbTcp(context)
+            val current = _debugProbe.value.tunnel.statusLog
+            val updated = _debugProbe.value.tunnel.copy(
+                statusLog = (current + listOf("--- Enable ADB TCP ---") + log).takeLast(30)
+            )
+            _debugProbe.value = _debugProbe.value.copy(tunnel = updated)
+        }
+    }
+
+    // ── USB Scanner ─────────────────────────────────────────────────
+
+    fun scanUsbDevices() {
+        val context = getApplication<Application>()
+        // UsbManager enumeration (Android API — instant)
+        val devices = com.openautolink.app.diagnostics.DeviceDebugProbe.enumerateUsbDevices(context)
+        _debugProbe.value = _debugProbe.value.copy(usbDevices = devices, usbScanDone = true)
+
+        // sysfs scan (background — may show more devices)
+        viewModelScope.launch {
+            val sysfs = com.openautolink.app.diagnostics.DeviceDebugProbe.scanSysfsUsbDevices()
+            _debugProbe.value = _debugProbe.value.copy(sysfsDevices = sysfs)
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         stopTcpListener()
+        // Note: remoteLogServer and reverseTunnel are NOT stopped here —
+        // they are application-scoped singletons that survive screen navigation.
+        // User explicitly stops them via the UI.
         diagnosticVehicleForwarder?.stop()
         diagnosticVehicleForwarder = null
         com.openautolink.app.diagnostics.DiagnosticLog.stopLocalCapture()

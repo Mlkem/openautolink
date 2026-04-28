@@ -454,12 +454,9 @@ class MediaCodecDecoder(
 
             val mc = MediaCodec.createByCodecName(decoderName)
             mc.configure(format, surface, null, 0)
-            // Set scaling BEFORE start — some Qualcomm decoders ignore post-start changes.
-            // SCALE_TO_FIT preserves aspect ratio (circles stay circular).
             try { mc.setVideoScalingMode(MediaCodec.VIDEO_SCALING_MODE_SCALE_TO_FIT) }
             catch (_: Exception) {}
             mc.start()
-            // Re-apply after start in case the decoder only accepts it post-start.
             try { mc.setVideoScalingMode(MediaCodec.VIDEO_SCALING_MODE_SCALE_TO_FIT) }
             catch (_: Exception) {}
             codec = mc

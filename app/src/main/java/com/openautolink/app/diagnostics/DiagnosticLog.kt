@@ -36,6 +36,10 @@ object DiagnosticLog {
     @Volatile
     var instance: RemoteDiagnostics? = null
 
+    /** Remote log server for TCP streaming to laptop. Set by DiagnosticsViewModel. */
+    @Volatile
+    var remoteLogServer: RemoteLogServer? = null
+
     private val ring = ArrayDeque<LocalLogEntry>(MAX_LOCAL_ENTRIES)
     private val _localLogs = MutableStateFlow<List<LocalLogEntry>>(emptyList())
     val localLogs: StateFlow<List<LocalLogEntry>> = _localLogs.asStateFlow()
@@ -83,5 +87,7 @@ object DiagnosticLog {
             ring.addLast(entry)
             _localLogs.value = ring.toList()
         }
+        // Stream to TCP clients if remote log server is active
+        remoteLogServer?.broadcast(entry)
     }
 }

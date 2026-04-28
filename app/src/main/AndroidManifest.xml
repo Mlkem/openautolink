@@ -47,6 +47,11 @@
         android:name="android.software.car.templates_host"
         android:required="true" />
 
+    <!-- USB Host feature (optional — don't block install on devices without it) -->
+    <uses-feature
+        android:name="android.hardware.usb.host"
+        android:required="false" />
+
     <application
         android:name=".OalApplication"
         android:allowBackup="false"
@@ -62,6 +67,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|keyboardHidden"
+            android:screenOrientation="sensorLandscape"
             android:launchMode="singleTask"
             android:windowSoftInputMode="stateAlwaysHidden">
             <intent-filter>
@@ -105,7 +111,7 @@
         <!-- Cluster Navigation CarAppService (headless — no UI on main display) -->
         <service
             android:name=".cluster.OalClusterService"
-            android:enabled="false"
+            android:enabled="true"
             android:exported="true">
             <intent-filter>
                 <action android:name="androidx.car.app.CarAppService" />
@@ -131,6 +137,30 @@
         <meta-data
             android:name="com.android.automotive.application.DISTRACTION_OPTIMIZED"
             android:value="true" />
+
+        <!-- Debug: change settings via ADB broadcast without rebuild -->
+        <receiver
+            android:name=".diagnostics.SettingsReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.openautolink.app.SET_PREF" />
+            </intent-filter>
+        </receiver>
+
+        <!-- USB device attached handler — routes to MainActivity -->
+        <activity
+            android:name=".transport.usb.UsbAttachedActivity"
+            android:exported="true"
+            android:enabled="true"
+            android:directBootAware="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/usb_device_filter" />
+        </activity>
 
         <!-- Media source for AAOS system UI, cluster, and steering wheel controls -->
         <service

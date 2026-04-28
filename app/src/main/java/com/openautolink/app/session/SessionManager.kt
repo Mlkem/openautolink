@@ -32,6 +32,7 @@ import com.openautolink.app.transport.ControlMessage
 import com.openautolink.app.transport.aasdk.AasdkSession
 import com.openautolink.app.transport.aasdk.AasdkSdrConfig
 import com.openautolink.app.transport.direct.AaNearbyManager
+import com.openautolink.app.transport.usb.UsbConnectionManager
 import com.openautolink.app.video.DecoderState
 import com.openautolink.app.video.MediaCodecDecoder
 import com.openautolink.app.video.VideoDecoder
@@ -319,8 +320,9 @@ class SessionManager(
 
         // Enable cluster service (AAOS only — on regular Android, CarAppActivity
         // steals focus from MainActivity and causes display issues)
-        val isAaos = context?.packageManager?.hasSystemFeature(
-            android.content.pm.PackageManager.FEATURE_AUTOMOTIVE) == true
+        // TODO(debug): Temporarily disabled cluster to isolate crash-on-connect
+        val isAaos = false // context?.packageManager?.hasSystemFeature(
+            // android.content.pm.PackageManager.FEATURE_AUTOMOTIVE) == true
         _clusterManager?.release()
         if (isAaos) {
             _clusterManager = context?.let { com.openautolink.app.cluster.ClusterManager(it) }
@@ -407,42 +409,59 @@ class SessionManager(
         val vd = _vehicleDataForwarder?.latestVehicleData?.value
         val driverPos = if (driveSide == "right") 1 else 0
 
-        // Auto-compute pixel_aspect if requested (aaPixelAspect == -1)
-        // or use manual value. 0 = off (square pixels).
+        // Auto-compute pixel_aspect_ratio for non-16:9 displays (crop mode).
         //
-        // pixel_aspect_ratio_e4 tells the phone how wide each pixel is relative
-        // to its height on the physical display. This compensates for non-16:9
-        // displays so AA pre-distorts its UI to appear correct when stretched.
+        // pixel_aspect tells the phone "each pixel on the display is X/10000
+        // times wider than tall". AA pre-shrinks its UI horizontally so that
+        // when the decoder stretches the 16:9 video to fill the wider display,
+        // the pre-shrunk circles expand back to round.
         //
-        // Only useful in crop mode (fillMaxSize stretches video to fill display).
-        // In letterbox mode the SurfaceView is constrained to 16:9, no stretching.
+        // Formula: pixel_aspect = (displayAR / videoAR) × 10000
+        //   e.g. Blazer EV 2914×1134 at 1440p: (2.57 / 1.78) × 10000 = 14454
         //
-        // Formula: (displayAR / videoAR) × 10000
-        //   e.g. Blazer EV 2914×1134 (2.57:1) at 1920×1080 (1.78:1):
-        //   (2914/1134) / (1920/1080) × 10000 = 14454
-        val computedPixelAspect = when {
-            aaPixelAspect > 0 -> aaPixelAspect  // Manual override
-            aaPixelAspect == -1 && scalingMode == "crop" -> {
-                // Auto-compute from display dimensions
-                val wm = ctx.getSystemService(android.content.Context.WINDOW_SERVICE) as android.view.WindowManager
-                val bounds = wm.currentWindowMetrics.bounds
-                val displayW = bounds.width().toFloat()
-                val displayH = bounds.height().toFloat()
-                val displayAr = displayW / displayH
-                val videoAr = resW.toFloat() / resH.toFloat()
-                if (displayAr > videoAr * 1.02f) {
-                    // Display is wider than video — compensation needed
-                    val pa = ((displayAr / videoAr) * 10000).toInt()
-                    OalLog.i(TAG, "Auto pixel_aspect: display=${displayW.toInt()}x${displayH.toInt()} " +
-                            "(${String.format("%.2f", displayAr)}:1) video=${resW}x${resH} " +
-                            "(${String.format("%.2f", videoAr)}:1) → pixel_aspect=$pa")
-                    pa
-                } else {
-                    OalLog.i(TAG, "Auto pixel_aspect: display is ≤16:9, no compensation needed")
-                    0
-                }
+        // Manual overrides for margins and pixel_aspect are respected if set.
+        val computedWidthMargin: Int
+        val computedHeightMargin: Int
+        val computedPixelAspect: Int
+        if (aaWidthMargin > 0 || aaHeightMargin > 0) {
+            // Manual margin override
+            computedWidthMargin = aaWidthMargin
+            computedHeightMargin = aaHeightMargin
+            computedPixelAspect = if (aaPixelAspect > 0) aaPixelAspect else 0
+        } else if (aaPixelAspect > 0) {
+            // Manual pixel_aspect override
+            computedWidthMargin = 0
+            computedHeightMargin = 0
+            computedPixelAspect = aaPixelAspect
+            OalLog.i(TAG, "Manual pixel_aspect=$aaPixelAspect")
+        } else if (scalingMode == "crop") {
+            // Auto-compute pixel_aspect from display geometry (like bridge-mode)
+            val wm = ctx.getSystemService(android.content.Context.WINDOW_SERVICE) as android.view.WindowManager
+            val bounds = wm.currentWindowMetrics.bounds
+            val displayW = bounds.width().toFloat()
+            val displayH = bounds.height().toFloat()
+            val displayAr = displayW / displayH
+            val videoAr = resW.toFloat() / resH.toFloat()
+            if (kotlin.math.abs(displayAr - videoAr) / videoAr > 0.02f) {
+                // Display AR differs from video AR — compensation needed
+                val pa = ((displayAr / videoAr) * 10000).toInt()
+                OalLog.i(TAG, "Auto pixel_aspect: display=${displayW.toInt()}x${displayH.toInt()} " +
+                        "(${String.format("%.2f", displayAr)}:1) video=${resW}x${resH} " +
+                        "(${String.format("%.2f", videoAr)}:1) → pixel_aspect=$pa")
+                computedWidthMargin = 0
+                computedHeightMargin = 0
+                computedPixelAspect = pa
+            } else {
+                OalLog.i(TAG, "Auto pixel_aspect: display matches video AR, no compensation needed")
+                computedWidthMargin = 0
+                computedHeightMargin = 0
+                computedPixelAspect = 0
             }
-            else -> 0  // Off
+        } else {
+            // Letterbox mode — no compensation needed
+            computedWidthMargin = 0
+            computedHeightMargin = 0
+            computedPixelAspect = if (aaPixelAspect > 0) aaPixelAspect else 0
         }
 
         val session = AasdkSession(scope, ctx)
@@ -453,8 +472,8 @@ class SessionManager(
             videoHeight = resH,
             videoFps = videoFps,
             videoDpi = aaDpi,
-            marginWidth = aaWidthMargin,
-            marginHeight = aaHeightMargin,
+            marginWidth = computedWidthMargin,
+            marginHeight = computedHeightMargin,
             pixelAspectE4 = computedPixelAspect,
             btMacAddress = btMac,
             vehicleMake = vd?.carMake ?: "OpenAutoLink",
@@ -495,10 +514,11 @@ class SessionManager(
                 val newState = connState.toSessionState()
                 _sessionState.value = newState
                 _statusMessage.value = when (newState) {
-                    SessionState.IDLE -> if (directTransport == "nearby")
-                        "Nearby: ${AaNearbyManager.status.value}"
-                    else
-                        "TCP: connecting to phone hotspot..."
+                    SessionState.IDLE -> when (directTransport) {
+                        "nearby" -> "Nearby: ${AaNearbyManager.status.value}"
+                        "usb" -> "USB: ${UsbConnectionManager.status.value}"
+                        else -> "TCP: connecting to phone hotspot..."
+                    }
                     SessionState.CONNECTING -> "Phone connecting..."
                     SessionState.CONNECTED -> "Handshake..."
                     SessionState.STREAMING -> "Streaming"
@@ -555,8 +575,19 @@ class SessionManager(
             }
         }
 
+        // Observe USB status (only in usb mode)
+        if (directTransport == "usb") {
+            scope.launch {
+                UsbConnectionManager.status.collect { usbStatus ->
+                    if (_sessionState.value == SessionState.IDLE) {
+                        _statusMessage.value = "USB: $usbStatus"
+                    }
+                }
+            }
+        }
+
         session.start()
-        OalLog.i(TAG, "aasdk JNI session started (Nearby transport)")
+        OalLog.i(TAG, "aasdk JNI session started ($directTransport transport)")
     }
 
     @android.annotation.SuppressLint("MissingPermission")

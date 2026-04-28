@@ -9,6 +9,7 @@ import com.openautolink.app.transport.ConnectionState
 import com.openautolink.app.transport.ControlMessage
 import com.openautolink.app.transport.direct.AaNearbyManager
 import com.openautolink.app.transport.direct.TcpConnector
+import com.openautolink.app.transport.usb.UsbConnectionManager
 import com.openautolink.app.video.VideoFrame
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -79,7 +80,10 @@ class AasdkSession(
     // TCP connector — only used in "hotspot" transport mode
     private var _tcpConnector: TcpConnector? = null
 
-    /** Current transport mode: "nearby" or "hotspot" */
+    // USB connection manager — only used in "usb" transport mode
+    private var _usbConnectionManager: UsbConnectionManager? = null
+
+    /** Current transport mode: "nearby", "hotspot", or "usb" */
     var transportMode: String = "hotspot"
 
     /** Manual IP address for testing (emulator). Overrides gateway/mDNS discovery. */
@@ -99,6 +103,7 @@ class AasdkSession(
 
         when (transportMode) {
             "hotspot" -> startTcp()
+            "usb" -> startUsb()
             else -> startNearby()
         }
     }
@@ -130,6 +135,36 @@ class AasdkSession(
         _tcpConnector?.start()
     }
 
+    private fun startUsb() {
+        OalLog.i(TAG, "Starting aasdk session (USB transport)")
+        _usbConnectionManager?.stop()
+        _usbConnectionManager = UsbConnectionManager(context, scope) { usbTransportPipe ->
+            scope.launch(Dispatchers.IO) {
+                OalLog.i(TAG, "USB transport ready — starting aasdk native session")
+                handleUsbConnection(usbTransportPipe)
+            }
+        }
+        _usbConnectionManager?.start()
+    }
+
+    private fun handleUsbConnection(pipe: AasdkTransportPipe) {
+        _connectionState.value = ConnectionState.CONNECTING
+
+        OalLog.i(TAG, "Starting native aasdk session (USB): ${sdrConfig.videoWidth}x${sdrConfig.videoHeight}")
+
+        transportPipe = pipe
+
+        try {
+            AasdkNative.nativeCreateSession()
+            AasdkNative.nativeStartSession(pipe, this, sdrConfig)
+        } catch (e: Exception) {
+            OalLog.e(TAG, "Native session start failed (USB): ${e.message}")
+            pipe.close()
+            transportPipe = null
+            _connectionState.value = ConnectionState.DISCONNECTED
+        }
+    }
+
     private fun handleConnection(socket: Socket) {
         _connectionState.value = ConnectionState.CONNECTING
 
@@ -158,6 +193,8 @@ class AasdkSession(
         _nearbyManager = null
         _tcpConnector?.stop()
         _tcpConnector = null
+        _usbConnectionManager?.stop()
+        _usbConnectionManager = null
         AasdkNative.nativeStopSession()
         transportPipe?.close()
         transportPipe = null
@@ -238,6 +275,7 @@ class AasdkSession(
                     OalLog.i(TAG, "Restarting transport connector")
                     when (transportMode) {
                         "hotspot" -> startTcp()
+                        "usb" -> startUsb()
                         else -> startNearby()
                     }
                 }

@@ -1,93 +1,145 @@
 ---
-description: "Use when modifying pixel_aspect_ratio, display scaling, video resolution, DPI, crop/letterbox mode, or any SDR video configuration. Contains the complete pixel aspect data flow and critical rules."
+description: "Use when modifying display scaling, video resolution, DPI, crop/letterbox mode, width_margin, height_margin, pixel_aspect_ratio, or any SDR video configuration. Contains the complete aspect ratio compensation system."
 applyTo: "app/**"
 ---
-# Pixel Aspect Ratio — Complete Guide
+# Display Aspect Ratio Compensation — Complete Guide
 
-## What It Does
+## The Problem
 
-`pixel_aspect_ratio_e4` tells the phone's AA encoder "each pixel on the car's display is X/10000 times wider than it is tall." AA pre-shrinks its UI horizontally so that when the video is stretched to fill a wide display, circles remain circular and text is not distorted.
+Car displays are rarely 16:9. AA encodes video at standard 16:9 resolutions (1920×1080, 3840×2160).
+If we stretch a 16:9 video to fill a wider display, circles become ovals.
 
-- `10000` = square pixels (1:1) — only correct if display AR matches video AR
-- `12188` = each pixel is 1.22x wide — e.g., S21 (2340×1080, 2.17:1) showing 1920×1080 (1.78:1)
-- `14454` = each pixel is 1.45x wide — e.g., Blazer EV (2914×1134, 2.57:1) showing 1920×1080
-- `0` = OFF — no compensation sent (phone assumes square pixels)
-- `-1` = AUTO — app computes from display/video aspect ratio at runtime
+## The Solution: width_margin / height_margin
 
-## The Formula
+`width_margin` tells the phone to **extend the rendered UI width** beyond the standard 16:9 resolution.
+The phone encodes the FULL width including the margin, so the video's aspect ratio matches the
+display's aspect ratio. No stretching. No black bars. Circles stay circular.
+
+For portrait displays (taller than 16:9), `height_margin` extends the height instead.
+
+### Formula
 
 ```
-pixel_aspect_ratio_e4 = (displayAR / videoAR) × 10000
-                      = (displayWidth/displayHeight) / (videoWidth/videoHeight) × 10000
+Wide display (landscape car HU):
+  width_margin = displayAR × videoHeight - videoWidth
+  e.g. S21 2340×1080 (2.17:1) at 1080p: 2.167 × 1080 - 1920 = 420
+
+Tall display (portrait car HU):
+  height_margin = videoWidth / displayAR - videoHeight
+  e.g. 1080×1920 (0.56:1) at 1080p: 1920 / 0.5625 - 1080 = 2333
 ```
 
-Only needed in **crop mode** where the video is stretched to fill the full display. In **letterbox mode** the SurfaceView is constrained to 16:9 so pixels are always square.
+### How the Phone Handles It
+
+The margin is set per video_config in the SDR. The phone **scales the margin proportionally** when
+it picks a higher resolution tier. So a margin of 420 computed for 1080p works correctly even when
+the phone auto-negotiates to 4K — the phone scales it to ~840 for 3840×2160.
+
+## ⚠️ CRITICAL: pixel_aspect_ratio_e4 Does NOT Work
+
+**DO NOT rely on `pixel_aspect_ratio_e4` for aspect ratio compensation.**
+
+Despite being a documented protobuf field, it is **not honored** by the phone's AA encoder in
+practice. Tested on OnePlus 13 with AA v16.7 — the field is sent correctly in the SDR but the
+phone does not pre-shrink the encoded video. Additionally, Qualcomm MediaCodec decoders **ignore**
+both `VIDEO_SCALING_MODE_SCALE_TO_FIT` and `VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING` — they
+always stretch the video to fill the Surface regardless of the scaling mode set.
+
+The `pixel_aspect_ratio_e4` field is kept in the code as a manual override option but is NOT used
+in the auto-compute path. `width_margin` is the correct mechanism.
 
 ## Data Flow (End to End)
 
 ```
-AppPreferences.DEFAULT_AA_PIXEL_ASPECT = -1 (auto)
+SessionManager.startSession()
     ↓
-DataStore → aaPixelAspect Flow → ProjectionViewModel combines into UiState
+WindowManager.currentWindowMetrics.bounds → displayW × displayH
     ↓
-ProjectionViewModel.connect() → SessionManager.start(aaPixelAspect=value)
+displayAR = displayW / displayH
+videoAR = resW / resH (from selected resolution, e.g. 1920/1080)
     ↓
-SessionManager.startSession(aaPixelAspect=value)
+if scalingMode == "crop" && displayAR > videoAR * 1.02:
+    computedWidthMargin = displayAR × resH - resW    (wide display)
+else if scalingMode == "crop" && displayAR < videoAR * 0.98:
+    computedHeightMargin = resW / displayAR - resH   (tall display)
+else:
+    no margin needed (display matches 16:9 or letterbox mode)
     ↓
-computedPixelAspect = when {
-    aaPixelAspect > 0 → aaPixelAspect     // Manual override (e.g., 14454)
-    aaPixelAspect == -1 && crop → auto     // Compute from display/video AR
-    else → 0                               // Off (letterbox or explicit 0)
-}
+AasdkSdrConfig(marginWidth = computedWidthMargin, marginHeight = computedHeightMargin)
     ↓
-AasdkSdrConfig(pixelAspectE4 = computedPixelAspect)
+C++ SDR builder: vc->set_width_margin(margin) for each video_config
     ↓
-C++ readInt("pixelAspectE4") → sdrConfig_.pixelAspectE4
+Phone AA renders UI at (videoWidth + margin) × videoHeight
     ↓
-SDR video_config: vc->set_pixel_aspect_ratio_e4(value) — only if > 0
-    ↓
-Phone AA encoder pre-shrinks UI to compensate
+Encoded video AR matches display AR → no stretching
 ```
 
 ## CRITICAL RULES — DO NOT VIOLATE
 
-### Rule 1: Default is ALWAYS -1
-Every parameter default for `aaPixelAspect` must be `-1` (auto-compute):
-- `AppPreferences.DEFAULT_AA_PIXEL_ASPECT = -1`
-- `SessionManager.start(aaPixelAspect: Int = -1)`
-- `SessionManager.startSession(aaPixelAspect: Int = -1)`
-- `ProjectionViewModel.ProjectionUiState(aaPixelAspect: Int = -1)`
-- `SettingsViewModel.SettingsUiState(aaPixelAspect: Int = AppPreferences.DEFAULT_AA_PIXEL_ASPECT)`
+### Rule 1: width_margin is the ONLY mechanism for aspect ratio compensation
+- `pixel_aspect_ratio_e4` does not work — phone ignores it
+- `MediaCodec.setVideoScalingMode()` does not work — Qualcomm ignores it
+- `width_margin` / `height_margin` is what headunit-revived uses and what works
 
-**If ANY of these defaults is changed to 0 or 10000, pixel aspect breaks silently** — circles become ovals on non-16:9 displays. The bug is invisible in logs (no error, just wrong proportions).
+### Rule 2: Auto-compute only in crop mode
+- **Crop mode** (`fillMaxSize`): video fills full display → margin needed to match AR
+- **Letterbox mode** (`aspectRatio(16f/9f)`): SurfaceView constrained to 16:9 → no margin needed
 
-### Rule 2: Never "simplify" the -1/0/positive logic
-The three-way value system is intentional:
-- `-1` = auto (compute at runtime from actual display geometry)
-- `0` = off (explicitly disabled, or letterbox mode where it's not needed)
-- `> 0` = manual override (user-specified exact value)
+### Rule 3: Margins are computed from DISPLAY dimensions, not video resolution
+The display is the physical constant. The margin adjusts the phone's render viewport to match it.
+If the user overrides resolution or DPI, the margin is still computed from the display.
 
-Do NOT collapse this to a boolean. Do NOT change 0 to mean "auto". Do NOT remove the -1 sentinel.
+### Rule 4: The margin goes in EVERY video_config in the SDR
+Whether auto-negotiate (all tiers) or manual (single tier), every `video_config` entry must have
+the margin set. The phone scales it proportionally to the selected resolution.
 
-### Rule 3: Auto-compute only in crop mode
-The auto-compute path checks `scalingMode == "crop"` because:
-- **Crop mode**: video fills full display → display is wider → pixels are stretched → compensation needed
-- **Letterbox mode**: SurfaceView is constrained to 16:9 via `aspectRatio(16f/9f)` → no stretch → no compensation needed
-
-### Rule 4: The SDR value must match the display's actual geometry
-If the user overrides resolution or DPI, pixel_aspect must still be computed from the DISPLAY dimensions (not the video resolution). The display is the physical constant; the video resolution is what we ask the phone to encode at.
+### Rule 5: Manual override via settings
+Users can override with `aa_width_margin` / `aa_height_margin` in settings. If either is > 0,
+auto-compute is bypassed and the manual value is used as-is.
 
 ## Verification
 
-Take a screenshot via ADB and check that circular icons (Maps, Spotify, Phone, Settings in the AA sidebar) are round, not oval. Compare width and height of any circular element — they should be equal within 2%.
+Take a screenshot and measure the Spotify icon (green circle in the AA dock bar at the bottom).
 
 ```powershell
 adb -s <device> shell screencap -p /sdcard/check.png
 adb -s <device> pull /sdcard/check.png
 ```
 
+**Find the Spotify green circle or Phone white circle** — NOT our Compose overlay icons (settings
+gear, info button) which are on the right side. Measure width vs height of the icon. They should
+be equal within 5%.
+
+```python
+# Quick check script
+from PIL import Image
+img = Image.open('check.png')
+pixels = img.load()
+w, h = img.size
+for sx in range(0, w-120, 10):
+    rows = []
+    for y in range(h-80, h):
+        le = re = None
+        for x in range(sx, min(sx+120, w)):
+            r, g, b = pixels[x, y][:3]
+            if (r+g+b)/3 > 15:
+                if le is None: le = x
+                re = x
+        if le and 20 < (re-le) < 100:
+            rows.append(re-le+1)
+    if len(rows) > 25:
+        mw = max(rows)
+        if 30 < mw < 100:
+            ratio = mw / len(rows)
+            if 0.7 < ratio < 1.5:
+                print(f'x~{sx}: W={mw} H={len(rows)} ratio={ratio:.3f}',
+                      'CIRCLE' if 0.9 < ratio < 1.1 else '')
+```
+
 ## History
 
-- Initial implementation: bridge-mode (always worked because bridge ran on AAOS with matching display)
-- Bug 2026-04-26: defaults were 0 in SessionManager parameters while -1 everywhere else → auto-compute never triggered
-- Fix: changed all parameter defaults to -1
+- 2026-04-26: Initial pixel_aspect_ratio_e4 implementation — sent correctly but phone ignores it
+- 2026-04-27: Tested SCALE_TO_FIT and SCALE_TO_FIT_WITH_CROPPING — Qualcomm decoder ignores both
+- 2026-04-27: Discovered width_margin approach from headunit-revived + AA APK teardown
+- 2026-04-27: Implemented auto-computed width_margin/height_margin — circles confirmed circular
+- pixel_aspect_ratio_e4 kept as manual override option but NOT used in auto path

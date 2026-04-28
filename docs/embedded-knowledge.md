@@ -16,34 +16,31 @@ Hard-won knowledge from the original CPC200 adapter app. These findings were val
 
 ### Display Cutout & Wide-Screen AA
 
-> **⚠️ CRITICAL — DO NOT CHANGE THE VIDEO SCALING MODE ⚠️**
+> **⚠️ CRITICAL — Aspect Ratio Compensation ⚠️**
 >
-> The MediaCodec scaling mode in `MediaCodecDecoder.kt` MUST be `VIDEO_SCALING_MODE_SCALE_TO_FIT`.
-> **NEVER use `VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING`.**
+> **Use `width_margin` / `height_margin` in the SDR to match the display aspect ratio.**
 >
-> **Why:** The Qualcomm `c2.qti.avc.decoder` on GM AAOS head units responds to these two
-> modes completely differently:
-> - `SCALE_TO_FIT`: Decoder preserves aspect ratio (uniform scale). Combined with
->   `pixel_aspect_ratio` in the AA SDR, AA pre-compensates its layout for the wider
->   display. The result: video fills the surface, circles are circles, all AA UI visible.
-> - `SCALE_TO_FIT_WITH_CROPPING`: Decoder stretches non-uniformly to fill both axes
->   independently. Circles become ovals. `pixel_aspect_ratio` cannot fix this because
->   it only affects AA's UI layout, not the decoder's physical pixel stretch.
+> - `pixel_aspect_ratio_e4` does NOT work — the phone's AA encoder ignores it
+> - `MediaCodec.setVideoScalingMode()` does NOT work — Qualcomm decoders ignore both
+>   `SCALE_TO_FIT` and `SCALE_TO_FIT_WITH_CROPPING`, always stretching to fill the Surface
+> - `width_margin` tells the phone to extend its rendered UI viewport width to match the
+>   display's aspect ratio. The phone encodes the full width (standard + margin), so the
+>   video AR matches the display AR. No stretching, no black bars, circles stay circular.
 >
-> This was debugged extensively over multiple sessions. Every attempt to use
-> `SCALE_TO_FIT_WITH_CROPPING` failed. Do not revisit this.
+> **Auto-computed** in `SessionManager.startSession()`:
+> ```
+> Wide display:  width_margin  = displayAR × videoHeight - videoWidth
+> Tall display:  height_margin = videoWidth / displayAR - videoHeight
+> ```
+> The phone scales the margin proportionally when it picks a higher resolution tier.
+> See `.github/instructions/pixel-aspect.instructions.md` for full details.
 
 - AAOS display cutout insets describe where the physical screen curves/slopes away
 - The app reads these via `WindowInsets.Type.displayCutout()` and sends them to the bridge in the hello message
 - The bridge auto-computes `stable_insets` from cutout (tells AA where physical curves are)
-- `pixel_aspect_ratio_e4` is set manually by the user (default 0, set via Settings → Video)
-  - For the Blazer EV in fullscreen crop mode: 14454
-  - This tells AA to layout its UI for the actual display aspect ratio
-  - Combined with `SCALE_TO_FIT`, the decoder preserves aspect ratio and the
-    pre-compensated layout fills the screen correctly
-- Settings are all manual — no auto-computation of pixel_aspect (auto-compute was
-  removed because it caused inconsistent behavior across sessions)
-- Override via Settings → Video tab (Width Margin, Height Margin, Pixel Aspect)
+- Margins are auto-computed from display dimensions — no manual configuration needed
+- Manual override available via Settings → Video tab (Width Margin, Height Margin)
+- `pixel_aspect_ratio_e4` is kept as a manual-only option but has no effect in practice
 - SoC: **Qualcomm Snapdragon SA8155P** (some GM generations use Intel — same screen/AAOS, different decoders)
 
 ### HW Video Decoders

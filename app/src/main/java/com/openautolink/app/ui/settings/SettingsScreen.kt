@@ -285,6 +285,7 @@ private fun ConnectionTab(viewModel: SettingsViewModel, uiState: SettingsUiState
             listOf(
                 "nearby" to "Google Nearby",
                 "hotspot" to "Phone Hotspot",
+                "usb" to "USB Cable",
             ).forEach { (mode, label) ->
                 FilterChip(
                     selected = uiState.directTransport == mode,
@@ -298,6 +299,7 @@ private fun ConnectionTab(viewModel: SettingsViewModel, uiState: SettingsUiState
             text = when (uiState.directTransport) {
                 "nearby" -> "Connect via Google Nearby Connections (Bluetooth → WiFi Direct). Requires companion app on phone. Supports multi-phone selection."
                 "hotspot" -> "Connect via phone's WiFi hotspot (TCP). Car must be on the phone's hotspot network. Companion app listens on port 5277."
+                "usb" -> "Connect via USB cable. Plug phone into car USB port and grant permission when prompted. No companion app or WiFi needed."
                 else -> ""
             },
             style = MaterialTheme.typography.bodySmall,
