@@ -98,6 +98,7 @@ add_library(openautolink-jni SHARED
     jni_session.cpp
     jni_channel_handlers.cpp
     jni_service_catalog.cpp
+    native_crash_handler.c
 )
 
 target_include_directories(openautolink-jni PRIVATE

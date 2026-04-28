@@ -12,6 +12,7 @@
 #include "jni_channel_handlers.h"
 
 #include <android/log.h>
+#include <vector>
 
 // Protobuf messages for SDR building
 #include <aap_protobuf/service/Service.pb.h>
@@ -1122,13 +1123,16 @@ void JniSession::sendTouchEvent(int action, int pointerId, float x, float y, int
 void JniSession::sendMultiTouchEvent(int action, int actionIndex,
     const int* ids, const float* xs, const float* ys, int count)
 {
-    if (!streaming_ || !inputChannel_) return;
+    if (!streaming_ || !inputChannel_ || count <= 0) return;
 
+    // Copy data for async lambda
     std::vector<int> vIds(ids, ids + count);
     std::vector<float> vXs(xs, xs + count);
     std::vector<float> vYs(ys, ys + count);
 
-    ioService_->post([this, action, actionIndex, vIds, vXs, vYs]() {
+    ioService_->post([this, action, actionIndex,
+                      vIds = std::move(vIds), vXs = std::move(vXs),
+                      vYs = std::move(vYs)]() {
         aap_protobuf::service::inputsource::message::InputReport report;
 
         auto now = std::chrono::duration_cast<std::chrono::microseconds>(

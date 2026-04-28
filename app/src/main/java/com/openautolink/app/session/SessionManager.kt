@@ -320,9 +320,8 @@ class SessionManager(
 
         // Enable cluster service (AAOS only — on regular Android, CarAppActivity
         // steals focus from MainActivity and causes display issues)
-        // TODO(debug): Temporarily disabled cluster to isolate crash-on-connect
-        val isAaos = false // context?.packageManager?.hasSystemFeature(
-            // android.content.pm.PackageManager.FEATURE_AUTOMOTIVE) == true
+        val isAaos = context?.packageManager?.hasSystemFeature(
+            android.content.pm.PackageManager.FEATURE_AUTOMOTIVE) == true
         _clusterManager?.release()
         if (isAaos) {
             _clusterManager = context?.let { com.openautolink.app.cluster.ClusterManager(it) }
@@ -390,17 +389,21 @@ class SessionManager(
 
         // Get BT MAC — BluetoothAdapter.getAddress() returns 02:00:00:00:00:00
         // on Android 8+ due to privacy. Try Settings.Secure first, then adapter.
+        // GM AAOS returns literal "None" for missing properties.
         var btMac = ""
         try {
             btMac = android.provider.Settings.Secure.getString(
                 ctx.contentResolver, "bluetooth_address") ?: ""
         } catch (_: Exception) {}
-        if (btMac.isEmpty() || btMac == "02:00:00:00:00:00") {
+        if (btMac.isEmpty() || btMac == "02:00:00:00:00:00"
+            || btMac.equals("none", ignoreCase = true)) {
+            btMac = ""
             try {
                 @Suppress("MissingPermission")
                 val btAdapter = android.bluetooth.BluetoothAdapter.getDefaultAdapter()
                 val addr = btAdapter?.address ?: ""
-                if (addr != "02:00:00:00:00:00") btMac = addr
+                if (addr != "02:00:00:00:00:00"
+                    && !addr.equals("none", ignoreCase = true)) btMac = addr
             } catch (_: Exception) {}
         }
         OalLog.i(TAG, "BT MAC for SDR: ${if (btMac.isNotEmpty()) btMac else "(none)"}")

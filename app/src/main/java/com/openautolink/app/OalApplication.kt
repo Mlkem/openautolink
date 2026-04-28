@@ -26,6 +26,7 @@ class OalApplication : Application() {
 
     companion object {
         private const val CRASH_FILE = "oal-crash.txt"
+        private const val NATIVE_CRASH_FILE = "oal-native-crash.txt"
         /** Max crash file size — prevents unbounded growth from crash loops. */
         private const val MAX_CRASH_FILE_SIZE = 64 * 1024L // 64 KB
     }
@@ -33,7 +34,9 @@ class OalApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         loadPreviousCrash()
+        loadPreviousNativeCrash()
         installCrashHandler()
+        installNativeCrashHandler()
     }
 
     /**
@@ -75,6 +78,35 @@ class OalApplication : Application() {
             other?.delete()
         } catch (e: Throwable) {
             Log.w("OAL-App", "Failed to load previous crash: ${e.message}")
+        }
+    }
+
+    private fun loadPreviousNativeCrash() {
+        try {
+            val crashFile = File(filesDir, NATIVE_CRASH_FILE).takeIf { it.exists() } ?: return
+            val content = crashFile.readText()
+            if (content.isBlank()) return
+
+            DiagnosticLog.e("NATIVE-CRASH", "=== Previous NATIVE crash report found ===")
+            for (line in content.lines()) {
+                if (line.isNotBlank()) {
+                    DiagnosticLog.e("NATIVE-CRASH", line)
+                }
+            }
+            DiagnosticLog.e("NATIVE-CRASH", "=== End of native crash report ===")
+            Log.i("OAL-App", "Previous native crash report loaded (${content.length} chars)")
+            crashFile.delete()
+        } catch (e: Throwable) {
+            Log.w("OAL-App", "Failed to load previous native crash: ${e.message}")
+        }
+    }
+
+    private fun installNativeCrashHandler() {
+        try {
+            com.openautolink.app.transport.aasdk.AasdkNative.nativeInstallCrashHandler(filesDir.absolutePath)
+            Log.i("OAL-App", "Native crash handler installed")
+        } catch (e: Throwable) {
+            Log.w("OAL-App", "Failed to install native crash handler: ${e.message}")
         }
     }
 

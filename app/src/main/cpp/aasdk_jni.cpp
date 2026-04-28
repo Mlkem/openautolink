@@ -11,6 +11,7 @@
 #include <mutex>
 
 #include "jni_session.h"
+#include "native_crash_handler.h"
 
 #define LOG_TAG "OAL-AasdkJni"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -35,6 +36,19 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* /*reserved*/)
 }
 
 extern "C" {
+
+/*
+ * Class:     com_openautolink_app_transport_aasdk_AasdkNative
+ * Method:    nativeInstallCrashHandler
+ */
+JNIEXPORT void JNICALL
+Java_com_openautolink_app_transport_aasdk_AasdkNative_nativeInstallCrashHandler(
+    JNIEnv* env, jclass /*clazz*/, jstring crashDir)
+{
+    const char* dir = env->GetStringUTFChars(crashDir, nullptr);
+    oal_install_native_crash_handler(dir);
+    env->ReleaseStringUTFChars(crashDir, dir);
+}
 
 /*
  * Class:     com_openautolink_app_transport_aasdk_AasdkNative

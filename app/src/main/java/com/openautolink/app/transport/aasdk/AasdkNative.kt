@@ -18,6 +18,10 @@ object AasdkNative {
 
     // -- Session lifecycle --
 
+    /** Install native signal handlers to capture SIGSEGV/SIGABRT crash reports. */
+    @JvmStatic
+    external fun nativeInstallCrashHandler(crashDir: String)
+
     /** Create a new native aasdk session. Must be called before start. */
     @JvmStatic
     external fun nativeCreateSession()
