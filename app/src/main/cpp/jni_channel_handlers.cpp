@@ -61,6 +61,48 @@ static std::string hexDump(const uint8_t* data, size_t len, size_t maxBytes = 25
     return ss.str();
 }
 
+// Log raw serialized bytes + unknown fields for any protobuf message.
+// Use for protocol investigation — reveals fields our .proto doesn't define.
+template<typename T>
+static void logProtoRaw(const char* label, const T& msg) {
+    std::string raw;
+    msg.SerializeToString(&raw);
+    if (raw.size() > 0) {
+        LOGI("%s RAW (%zu bytes): %s", label, raw.size(),
+             hexDump(reinterpret_cast<const uint8_t*>(raw.data()), raw.size(), 512).c_str());
+    }
+    const auto& uf = msg.unknown_fields();
+    if (uf.field_count() > 0) {
+        LOGI("%s has %d UNKNOWN fields", label, uf.field_count());
+        for (int i = 0; i < uf.field_count(); ++i) {
+            const auto& f = uf.field(i);
+            switch (f.type()) {
+                case google::protobuf::UnknownField::TYPE_VARINT:
+                    LOGI("  %s UNKNOWN #%d varint=%llu", label, f.number(), (unsigned long long)f.varint());
+                    break;
+                case google::protobuf::UnknownField::TYPE_FIXED32: {
+                    auto v = f.fixed32();
+                    float fv; memcpy(&fv, &v, sizeof(fv));
+                    LOGI("  %s UNKNOWN #%d fixed32=%u (float=%f)", label, f.number(), v, fv);
+                    break;
+                }
+                case google::protobuf::UnknownField::TYPE_FIXED64:
+                    LOGI("  %s UNKNOWN #%d fixed64=%llu", label, f.number(), (unsigned long long)f.fixed64());
+                    break;
+                case google::protobuf::UnknownField::TYPE_LENGTH_DELIMITED: {
+                    const auto& ld = f.length_delimited();
+                    LOGI("  %s UNKNOWN #%d bytes(%zu): %s", label, f.number(), ld.size(),
+                         hexDump(reinterpret_cast<const uint8_t*>(ld.data()), ld.size()).c_str());
+                    break;
+                }
+                default:
+                    LOGI("  %s UNKNOWN #%d type=%d", label, f.number(), f.type());
+                    break;
+            }
+        }
+    }
+}
+
 namespace openautolink::jni {
 
 // ============================================================================
@@ -93,9 +135,10 @@ int JniAudioSinkHandler::purposeFromType() const
 }
 
 void JniAudioSinkHandler::onChannelOpenRequest(
-    const aap_protobuf::service::control::message::ChannelOpenRequest& /*request*/)
+    const aap_protobuf::service::control::message::ChannelOpenRequest& request)
 {
     LOGI("Audio channel open (type=%d)", static_cast<int>(type_));
+    logProtoRaw("AudioChannelOpen", request);
     aap_protobuf::service::control::message::ChannelOpenResponse response;
     response.set_status(aap_protobuf::shared::STATUS_SUCCESS);
     auto promise = aasdk::channel::SendPromise::defer(strand_);
@@ -105,9 +148,10 @@ void JniAudioSinkHandler::onChannelOpenRequest(
 }
 
 void JniAudioSinkHandler::onMediaChannelSetupRequest(
-    const aap_protobuf::service::media::shared::message::Setup& /*request*/)
+    const aap_protobuf::service::media::shared::message::Setup& request)
 {
-    LOGI("Audio setup (type=%d)", static_cast<int>(type_));
+    LOGI("Audio setup (type=%d) codec=%d", static_cast<int>(type_), request.type());
+    logProtoRaw("AudioSetup", request);
     aap_protobuf::service::media::shared::message::Config config;
     config.set_status(aap_protobuf::service::media::shared::message::Config::STATUS_READY);
     config.set_max_unacked(30);
@@ -122,16 +166,19 @@ void JniAudioSinkHandler::onMediaChannelSetupRequest(
 }
 
 void JniAudioSinkHandler::onMediaChannelStartIndication(
-    const aap_protobuf::service::media::shared::message::Start& /*indication*/)
+    const aap_protobuf::service::media::shared::message::Start& indication)
 {
-    LOGI("Audio start (type=%d)", static_cast<int>(type_));
+    LOGI("Audio start (type=%d) session=%d config_idx=%d", static_cast<int>(type_),
+         indication.session_id(), indication.configuration_index());
+    logProtoRaw("AudioStart", indication);
     channel_->receive(shared_from_this());
 }
 
 void JniAudioSinkHandler::onMediaChannelStopIndication(
-    const aap_protobuf::service::media::shared::message::Stop& /*indication*/)
+    const aap_protobuf::service::media::shared::message::Stop& indication)
 {
     LOGI("Audio stop (type=%d)", static_cast<int>(type_));
+    logProtoRaw("AudioStop", indication);
     channel_->receive(shared_from_this());
 }
 
@@ -184,9 +231,10 @@ void JniSensorHandler::start()
 }
 
 void JniSensorHandler::onChannelOpenRequest(
-    const aap_protobuf::service::control::message::ChannelOpenRequest& /*request*/)
+    const aap_protobuf::service::control::message::ChannelOpenRequest& request)
 {
     LOGI("Sensor channel open");
+    logProtoRaw("SensorChannelOpen", request);
     aap_protobuf::service::control::message::ChannelOpenResponse response;
     response.set_status(aap_protobuf::shared::STATUS_SUCCESS);
     auto promise = aasdk::channel::SendPromise::defer(strand_);
@@ -199,6 +247,7 @@ void JniSensorHandler::onSensorStartRequest(
     const aap_protobuf::service::sensorsource::message::SensorRequest& request)
 {
     LOGI("Sensor start request: type=%d", request.type());
+    logProtoRaw("SensorStartReq", request);
 
     // Respond with OK Ã¢â‚¬â€ phone expects acknowledgement before sending sensor polls
     aap_protobuf::service::sensorsource::message::SensorStartResponseMessage response;
@@ -233,9 +282,10 @@ void JniInputHandler::start()
 }
 
 void JniInputHandler::onChannelOpenRequest(
-    const aap_protobuf::service::control::message::ChannelOpenRequest& /*request*/)
+    const aap_protobuf::service::control::message::ChannelOpenRequest& request)
 {
     LOGI("Input channel open");
+    logProtoRaw("InputChannelOpen", request);
     aap_protobuf::service::control::message::ChannelOpenResponse response;
     response.set_status(aap_protobuf::shared::STATUS_SUCCESS);
     auto promise = aasdk::channel::SendPromise::defer(strand_);
@@ -245,9 +295,10 @@ void JniInputHandler::onChannelOpenRequest(
 }
 
 void JniInputHandler::onKeyBindingRequest(
-    const aap_protobuf::service::media::sink::message::KeyBindingRequest& /*request*/)
+    const aap_protobuf::service::media::sink::message::KeyBindingRequest& request)
 {
     LOGI("Key binding request");
+    logProtoRaw("KeyBinding", request);
     channel_->receive(shared_from_this());
 }
 
@@ -274,9 +325,10 @@ void JniNavStatusHandler::start()
 }
 
 void JniNavStatusHandler::onChannelOpenRequest(
-    const aap_protobuf::service::control::message::ChannelOpenRequest& /*request*/)
+    const aap_protobuf::service::control::message::ChannelOpenRequest& request)
 {
     LOGI("Nav status channel open");
+    logProtoRaw("NavStatusChannelOpen", request);
     aap_protobuf::service::control::message::ChannelOpenResponse response;
     response.set_status(aap_protobuf::shared::STATUS_SUCCESS);
     auto promise = aasdk::channel::SendPromise::defer(strand_);
@@ -742,9 +794,10 @@ void JniMicHandler::start()
 }
 
 void JniMicHandler::onChannelOpenRequest(
-    const aap_protobuf::service::control::message::ChannelOpenRequest& /*request*/)
+    const aap_protobuf::service::control::message::ChannelOpenRequest& request)
 {
     LOGI("Mic channel open");
+    logProtoRaw("MicChannelOpen", request);
     aap_protobuf::service::control::message::ChannelOpenResponse response;
     response.set_status(aap_protobuf::shared::STATUS_SUCCESS);
     auto promise = aasdk::channel::SendPromise::defer(strand_);
@@ -754,9 +807,10 @@ void JniMicHandler::onChannelOpenRequest(
 }
 
 void JniMicHandler::onMediaChannelSetupRequest(
-    const aap_protobuf::service::media::shared::message::Setup& /*request*/)
+    const aap_protobuf::service::media::shared::message::Setup& request)
 {
-    LOGI("Mic setup");
+    LOGI("Mic setup codec=%d", request.type());
+    logProtoRaw("MicSetup", request);
     aap_protobuf::service::media::shared::message::Config config;
     config.set_status(aap_protobuf::service::media::shared::message::Config::STATUS_READY);
     config.set_max_unacked(30);
@@ -819,9 +873,10 @@ void JniMediaStatusHandler::start()
 }
 
 void JniMediaStatusHandler::onChannelOpenRequest(
-    const aap_protobuf::service::control::message::ChannelOpenRequest& /*request*/)
+    const aap_protobuf::service::control::message::ChannelOpenRequest& request)
 {
     LOGI("Media status channel open");
+    logProtoRaw("MediaStatusChannelOpen", request);
     aap_protobuf::service::control::message::ChannelOpenResponse response;
     response.set_status(aap_protobuf::shared::STATUS_SUCCESS);
     auto promise = aasdk::channel::SendPromise::defer(strand_);
@@ -833,6 +888,7 @@ void JniMediaStatusHandler::onChannelOpenRequest(
 void JniMediaStatusHandler::onMetadataUpdate(
     const aap_protobuf::service::mediaplayback::message::MediaPlaybackMetadata& metadata)
 {
+    logProtoRaw("MediaMetadata", metadata);
     std::string title = metadata.has_song() ? metadata.song() : "";
     std::string artist = metadata.has_artist() ? metadata.artist() : "";
     std::string album = metadata.has_album() ? metadata.album() : "";
@@ -851,6 +907,7 @@ void JniMediaStatusHandler::onMetadataUpdate(
 void JniMediaStatusHandler::onPlaybackUpdate(
     const aap_protobuf::service::mediaplayback::message::MediaPlaybackStatus& playback)
 {
+    logProtoRaw("MediaPlayback", playback);
     int state = playback.has_state() ? static_cast<int>(playback.state()) : 0;
     long long positionMs = playback.has_playback_seconds() ? static_cast<long long>(playback.playback_seconds()) * 1000 : 0;
     session_.dispatchMediaPlayback(state, positionMs);
@@ -880,9 +937,10 @@ void JniPhoneStatusHandler::start()
 }
 
 void JniPhoneStatusHandler::onChannelOpenRequest(
-    const aap_protobuf::service::control::message::ChannelOpenRequest& /*request*/)
+    const aap_protobuf::service::control::message::ChannelOpenRequest& request)
 {
     LOGI("Phone status channel open");
+    logProtoRaw("PhoneStatusChannelOpen", request);
     aap_protobuf::service::control::message::ChannelOpenResponse response;
     response.set_status(aap_protobuf::shared::STATUS_SUCCESS);
     auto promise = aasdk::channel::SendPromise::defer(strand_);
@@ -894,6 +952,7 @@ void JniPhoneStatusHandler::onChannelOpenRequest(
 void JniPhoneStatusHandler::onPhoneStatusUpdate(
     const aap_protobuf::service::phonestatus::message::PhoneStatus& status)
 {
+    logProtoRaw("PhoneStatus", status);
     int signal = status.has_signal_strength() ? status.signal_strength() : -1;
     int callState = 0;
     if (status.calls_size() > 0) {
@@ -926,9 +985,10 @@ void JniBluetoothHandler::start()
 }
 
 void JniBluetoothHandler::onChannelOpenRequest(
-    const aap_protobuf::service::control::message::ChannelOpenRequest& /*request*/)
+    const aap_protobuf::service::control::message::ChannelOpenRequest& request)
 {
     LOGI("Bluetooth channel open");
+    logProtoRaw("BTChannelOpen", request);
     aap_protobuf::service::control::message::ChannelOpenResponse response;
     response.set_status(aap_protobuf::shared::STATUS_SUCCESS);
     auto promise = aasdk::channel::SendPromise::defer(strand_);
@@ -938,17 +998,19 @@ void JniBluetoothHandler::onChannelOpenRequest(
 }
 
 void JniBluetoothHandler::onBluetoothPairingRequest(
-    const aap_protobuf::service::bluetooth::message::BluetoothPairingRequest& /*request*/)
+    const aap_protobuf::service::bluetooth::message::BluetoothPairingRequest& request)
 {
     LOGI("Bluetooth pairing request");
+    logProtoRaw("BTPairing", request);
     // In JNI mode, BT pairing is handled by Nearby Ã¢â‚¬â€ just acknowledge
     channel_->receive(shared_from_this());
 }
 
 void JniBluetoothHandler::onBluetoothAuthenticationResult(
-    const aap_protobuf::service::bluetooth::message::BluetoothAuthenticationResult& /*request*/)
+    const aap_protobuf::service::bluetooth::message::BluetoothAuthenticationResult& result)
 {
     LOGI("Bluetooth auth result");
+    logProtoRaw("BTAuth", result);
     channel_->receive(shared_from_this());
 }
 

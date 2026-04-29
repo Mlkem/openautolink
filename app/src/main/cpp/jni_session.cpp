@@ -58,6 +58,61 @@
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
+// Hex-dump helper for raw protobuf bytes
+static std::string hexDump(const uint8_t* data, size_t len, size_t maxBytes = 512) {
+    std::ostringstream ss;
+    size_t cap = (len < maxBytes) ? len : maxBytes;
+    for (size_t i = 0; i < cap; ++i) {
+        char buf[4];
+        snprintf(buf, sizeof(buf), "%02x", data[i]);
+        ss << buf;
+        if (i + 1 < cap) ss << ' ';
+    }
+    if (len > maxBytes) ss << " ...(" << len << " total)";
+    return ss.str();
+}
+
+// Log raw bytes + unknown fields for any protobuf message
+template<typename T>
+static void logProtoRaw(const char* label, const T& msg) {
+    std::string raw;
+    msg.SerializeToString(&raw);
+    if (raw.size() > 0) {
+        LOGI("%s RAW (%zu bytes): %s", label, raw.size(),
+             hexDump(reinterpret_cast<const uint8_t*>(raw.data()), raw.size()).c_str());
+    }
+    const auto& uf = msg.unknown_fields();
+    if (uf.field_count() > 0) {
+        LOGI("%s has %d UNKNOWN fields", label, uf.field_count());
+        for (int i = 0; i < uf.field_count(); ++i) {
+            const auto& f = uf.field(i);
+            switch (f.type()) {
+                case google::protobuf::UnknownField::TYPE_VARINT:
+                    LOGI("  %s UNKNOWN #%d varint=%llu", label, f.number(), (unsigned long long)f.varint());
+                    break;
+                case google::protobuf::UnknownField::TYPE_FIXED32: {
+                    auto v = f.fixed32();
+                    float fv; memcpy(&fv, &v, sizeof(fv));
+                    LOGI("  %s UNKNOWN #%d fixed32=%u (float=%f)", label, f.number(), v, fv);
+                    break;
+                }
+                case google::protobuf::UnknownField::TYPE_FIXED64:
+                    LOGI("  %s UNKNOWN #%d fixed64=%llu", label, f.number(), (unsigned long long)f.fixed64());
+                    break;
+                case google::protobuf::UnknownField::TYPE_LENGTH_DELIMITED: {
+                    const auto& ld = f.length_delimited();
+                    LOGI("  %s UNKNOWN #%d bytes(%zu): %s", label, f.number(), ld.size(),
+                         hexDump(reinterpret_cast<const uint8_t*>(ld.data()), ld.size()).c_str());
+                    break;
+                }
+                default:
+                    LOGI("  %s UNKNOWN #%d type=%d", label, f.number(), f.type());
+                    break;
+            }
+        }
+    }
+}
+
 namespace openautolink::jni {
 
 // ============================================================================
@@ -203,8 +258,8 @@ void JniSession::start(JNIEnv* env, jobject transportPipe, jobject callback, job
          sdrConfig_.videoWidth, sdrConfig_.videoHeight,
          sdrConfig_.videoFps, sdrConfig_.videoDpi, sdrConfig_.realDensity,
          sdrConfig_.pixelAspectE4, sdrConfig_.marginWidth, sdrConfig_.marginHeight,
-         sdrConfig_.autoNegotiate,
-         sdrConfig_.videoCodec.c_str(), sdrConfig_.targetLayoutWidthDp);
+         sdrConfig_.autoNegotiate, sdrConfig_.videoCodec.c_str(),
+         sdrConfig_.targetLayoutWidthDp);
     if (sdrConfig_.safeAreaTop > 0 || sdrConfig_.safeAreaBottom > 0 ||
         sdrConfig_.safeAreaLeft > 0 || sdrConfig_.safeAreaRight > 0) {
         LOGI("Safe area insets: top=%d bottom=%d left=%d right=%d",
@@ -427,6 +482,7 @@ void JniSession::onAudioFocusRequest(
     const aap_protobuf::service::control::message::AudioFocusRequest& request)
 {
     auto focus_type = request.audio_focus_type();
+    logProtoRaw("AudioFocusReq", request);
     // Match bridge logic: map request type → response state
     aap_protobuf::service::control::message::AudioFocusStateType state;
     switch (focus_type) {
@@ -603,9 +659,10 @@ void JniSession::onChannelError(const aasdk::error::Error& e)
 // ============================================================================
 
 void JniSession::onChannelOpenRequest(
-    const aap_protobuf::service::control::message::ChannelOpenRequest& /*request*/)
+    const aap_protobuf::service::control::message::ChannelOpenRequest& request)
 {
     LOGI("Video channel open request");
+    logProtoRaw("VideoChannelOpen", request);
     aap_protobuf::service::control::message::ChannelOpenResponse response;
     response.set_status(aap_protobuf::shared::STATUS_SUCCESS);
     auto promise = aasdk::channel::SendPromise::defer(*strand_);
@@ -618,6 +675,7 @@ void JniSession::onMediaChannelSetupRequest(
     const aap_protobuf::service::media::shared::message::Setup& request)
 {
     LOGI("Video setup from phone: type=%d (0=H264 1=H265 2=VP9)", request.type());
+    logProtoRaw("VideoSetup", request);
     negotiatedCodecType_ = request.type();
 
     // Notify Kotlin of the negotiated codec type so the decoder configures correctly
@@ -662,9 +720,11 @@ void JniSession::onMediaChannelSetupRequest(
 }
 
 void JniSession::onMediaChannelStartIndication(
-    const aap_protobuf::service::media::shared::message::Start& /*indication*/)
+    const aap_protobuf::service::media::shared::message::Start& indication)
 {
-    LOGI("Video stream starting");
+    LOGI("Video stream starting: session=%d config_idx=%d",
+         indication.session_id(), indication.configuration_index());
+    logProtoRaw("VideoStart", indication);
 
     aap_protobuf::service::media::video::message::VideoFocusNotification focus;
     focus.set_focus(aap_protobuf::service::media::video::message::VIDEO_FOCUS_PROJECTED);
@@ -1071,9 +1131,6 @@ void JniSession::buildServiceDiscoveryResponse(
       ss->add_sensors()->set_sensor_type(ST::SENSOR_GPS_SATELLITE_DATA);
       ss->add_sensors()->set_sensor_type(ST::SENSOR_RPM);
       ss->add_sensors()->set_sensor_type(ST::SENSOR_VEHICLE_ENERGY_MODEL);
-      // Location characterization bitmask — tells AA about available sensor fusion
-      // RAW_GPS_ONLY=256, ACCELEROMETER=4, GYROSCOPE=2, COMPASS=8, CAR_SPEED=64
-      ss->set_location_characterization(256 | 4 | 2 | 8 | 64);
     }
 
     // ---- Input channel ----
@@ -1141,12 +1198,10 @@ void JniSession::buildServiceDiscoveryResponse(
                  (int)ms.available_while_in_call());
             for (int v = 0; v < ms.video_configs_size(); v++) {
                 const auto& vc = ms.video_configs(v);
-                LOGI("    vc[%d] res=%d fps=%d dpi=%d codec=%d pixel_aspect=%d wMargin=%d hMargin=%d",
+                LOGI("    vc[%d] res=%d fps=%d dpi=%d codec=%d pixel_aspect=%d",
                      v, (int)vc.codec_resolution(), (int)vc.frame_rate(),
                      vc.density(), (int)vc.video_codec_type(),
-                     vc.has_pixel_aspect_ratio_e4() ? vc.pixel_aspect_ratio_e4() : 0,
-                     vc.has_width_margin() ? vc.width_margin() : 0,
-                     vc.has_height_margin() ? vc.height_margin() : 0);
+                     vc.has_pixel_aspect_ratio_e4() ? vc.pixel_aspect_ratio_e4() : 0);
             }
         } else if (ch.has_media_source_service()) {
             LOGI("  ch[%d] id=%d media_source: avail_type=%d", i, ch.id(),
