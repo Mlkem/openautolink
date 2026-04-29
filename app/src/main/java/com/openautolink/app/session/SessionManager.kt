@@ -822,6 +822,16 @@ class SessionManager(
                 manualIpAddress,
                 safeAreaTop, safeAreaBottom, safeAreaLeft, safeAreaRight)
         }
+
+        // 9. Re-establish cluster binding — GM Templates Host may have killed
+        // the session during sleep/suspend
+        _clusterManager?.ensureAlive()
+
+        // 10. Re-push MediaSession token — GM's media widget may have lost
+        // the binding during sleep
+        _mediaSessionManager?.getSessionToken()?.let { token ->
+            OalMediaBrowserService.updateSessionToken(token)
+        }
     }
 
     /**
@@ -837,8 +847,15 @@ class SessionManager(
 
         OalLog.i(TAG, "System wake detected (${elapsed / 1000}s gap, state=$state)")
         DiagnosticLog.i("transport", "System wake detected (${elapsed / 1000}s gap)")
-        // aasdk mode: the Nearby manager handles reconnection
-        // No explicit force-reconnect needed
+
+        // Re-establish cluster binding — GM Templates Host may have killed
+        // the session during sleep/suspend
+        _clusterManager?.ensureAlive()
+
+        // Re-push MediaSession token — cluster media widget may have lost binding
+        _mediaSessionManager?.getSessionToken()?.let { token ->
+            OalMediaBrowserService.updateSessionToken(token)
+        }
     }
 
     suspend fun requestKeyframe() {
