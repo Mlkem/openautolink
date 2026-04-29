@@ -13,9 +13,9 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.wifi.WifiManager
 import android.os.Build
-import android.util.Log
 import androidx.core.content.ContextCompat
 import com.openautolink.companion.CompanionPrefs
+import com.openautolink.companion.diagnostics.CompanionLog
 import com.openautolink.companion.service.CompanionService
 
 /**
@@ -26,12 +26,12 @@ import com.openautolink.companion.service.CompanionService
 class WifiJobService : JobService() {
 
     override fun onStartJob(params: JobParameters?): Boolean {
-        Log.i(TAG, "WiFi job triggered by OS")
+        CompanionLog.i(TAG, "WiFi job triggered by OS")
         Thread {
             try {
                 checkWifiAndStart(this)
             } catch (e: Exception) {
-                Log.e(TAG, "WiFi check failed: ${e.message}")
+                CompanionLog.e(TAG, "WiFi check failed: ${e.message}")
             } finally {
                 jobFinished(params, false)
             }
@@ -60,10 +60,10 @@ class WifiJobService : JobService() {
             val ssid = wifiManager.connectionInfo.ssid?.replace("\"", "") ?: ""
             val currentSsid = if (ssid == "<unknown ssid>") "" else ssid
 
-            Log.d(TAG, "Current SSID='$currentSsid', targets=$targetSsids")
+            CompanionLog.d(TAG, "Current SSID='$currentSsid', targets=$targetSsids")
 
             if (targetSsids.any { it.equals(currentSsid, ignoreCase = true) }) {
-                Log.i(TAG, "SSID match — starting service")
+                CompanionLog.i(TAG, "SSID match — starting service")
                 val serviceIntent = Intent(context, CompanionService::class.java).apply {
                     action = CompanionService.ACTION_START
                 }
@@ -71,14 +71,14 @@ class WifiJobService : JobService() {
                     ContextCompat.startForegroundService(context, serviceIntent)
                     return true
                 } catch (e: Exception) {
-                    Log.e(TAG, "Start failed: ${e.message}")
+                    CompanionLog.e(TAG, "Start failed: ${e.message}")
                 }
             }
             return false
         }
 
         fun schedule(context: Context) {
-            Log.i(TAG, "Scheduling WiFi auto-start")
+            CompanionLog.i(TAG, "Scheduling WiFi auto-start")
 
             // Modern: ConnectivityManager callback via PendingIntent
             val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -91,9 +91,9 @@ class WifiJobService : JobService() {
             val pending = PendingIntent.getBroadcast(context, 0, intent, flags)
             try {
                 cm.registerNetworkCallback(request, pending)
-                Log.i(TAG, "NetworkCallback registered")
+                CompanionLog.i(TAG, "NetworkCallback registered")
             } catch (e: Exception) {
-                Log.e(TAG, "NetworkCallback registration failed: ${e.message}")
+                CompanionLog.e(TAG, "NetworkCallback registration failed: ${e.message}")
             }
 
             // Fallback: periodic JobScheduler
@@ -107,7 +107,7 @@ class WifiJobService : JobService() {
         }
 
         fun cancel(context: Context) {
-            Log.i(TAG, "Cancelling WiFi auto-start triggers")
+            CompanionLog.i(TAG, "Cancelling WiFi auto-start triggers")
             val scheduler = context.getSystemService(Context.JOB_SCHEDULER_SERVICE) as JobScheduler
             scheduler.cancel(JOB_ID)
 

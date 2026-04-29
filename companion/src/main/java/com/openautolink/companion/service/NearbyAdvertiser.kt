@@ -4,9 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.os.ParcelFileDescriptor
 import android.provider.Settings
-import android.util.Log
 import com.openautolink.companion.connection.AaProxy
 import com.openautolink.companion.connection.NearbySocket
+import com.openautolink.companion.diagnostics.CompanionLog
 import com.openautolink.companion.trigger.TransparentTriggerActivity
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.AdvertisingOptions
@@ -52,12 +52,12 @@ class NearbyAdvertiser(
     private var isLaunching = false
 
     fun start() {
-        Log.i(TAG, "Starting Nearby advertising...")
+        CompanionLog.i(TAG, "Starting Nearby advertising...")
         startAdvertising()
     }
 
     fun stop() {
-        Log.i(TAG, "Stopping Nearby advertising")
+        CompanionLog.i(TAG, "Stopping Nearby advertising")
         connectionsClient.stopAdvertising()
         connectionsClient.stopAllEndpoints()
         cleanup()
@@ -79,11 +79,11 @@ class NearbyAdvertiser(
             .build()
 
         val endpointName = resolveEndpointName()
-        Log.i(TAG, "Advertising as \"$endpointName\" (service=$LEGACY_SERVICE_ID)")
+        CompanionLog.i(TAG, "Advertising as \"$endpointName\" (service=$LEGACY_SERVICE_ID)")
 
         connectionsClient.startAdvertising(endpointName, LEGACY_SERVICE_ID, connectionCallback, options)
-            .addOnSuccessListener { Log.i(TAG, "Advertising started (service=$LEGACY_SERVICE_ID)") }
-            .addOnFailureListener { e -> Log.e(TAG, "Advertising failed: ${e.message}") }
+            .addOnSuccessListener { CompanionLog.i(TAG, "Advertising started (service=$LEGACY_SERVICE_ID)") }
+            .addOnFailureListener { e -> CompanionLog.e(TAG, "Advertising failed: ${e.message}") }
     }
 
     private fun resolveEndpointName(): String {
@@ -102,19 +102,19 @@ class NearbyAdvertiser(
 
     private val connectionCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
-            Log.i(TAG, "Connection initiated from ${info.endpointName} ($endpointId), accepting")
+            CompanionLog.i(TAG, "Connection initiated from ${info.endpointName} ($endpointId), accepting")
             stateListener.onConnecting()
             connectionsClient.acceptConnection(endpointId, payloadCallback)
         }
 
         override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
             if (result.status.statusCode != ConnectionsStatusCodes.STATUS_OK) {
-                Log.w(TAG, "Connection failed: ${result.status.statusMessage}, re-advertising")
+                CompanionLog.w(TAG, "Connection failed: ${result.status.statusMessage}, re-advertising")
                 startAdvertising()
                 return
             }
 
-            Log.i(TAG, "Connected to car ($endpointId). Building tunnel...")
+            CompanionLog.i(TAG, "Connected to car ($endpointId). Building tunnel...")
             connectionsClient.stopAdvertising()
 
             scope.launch {
@@ -130,11 +130,11 @@ class NearbyAdvertiser(
                     ParcelFileDescriptor.AutoCloseOutputStream(pipes[1])
                 val outPayload = Payload.fromStream(pipes[0])
 
-                Log.i(TAG, "Sending phone→car stream payload")
+                CompanionLog.i(TAG, "Sending phone→car stream payload")
                 connectionsClient.sendPayload(endpointId, outPayload)
-                    .addOnSuccessListener { Log.i(TAG, "Stream payload registered") }
+                    .addOnSuccessListener { CompanionLog.i(TAG, "Stream payload registered") }
                     .addOnFailureListener { e ->
-                        Log.e(TAG, "Stream send failed: ${e.message}")
+                        CompanionLog.e(TAG, "Stream send failed: ${e.message}")
                         cleanup()
                         stateListener.onProxyDisconnected()
                     }
@@ -146,7 +146,7 @@ class NearbyAdvertiser(
         }
 
         override fun onDisconnected(endpointId: String) {
-            Log.i(TAG, "Disconnected from $endpointId")
+            CompanionLog.i(TAG, "Disconnected from $endpointId")
             cleanup()
             stateListener.onProxyDisconnected()
         }
@@ -154,19 +154,19 @@ class NearbyAdvertiser(
 
     private val payloadCallback = object : PayloadCallback() {
         override fun onPayloadReceived(endpointId: String, payload: Payload) {
-            Log.i(TAG, "Payload received type=${payload.type}")
+            CompanionLog.i(TAG, "Payload received type=${payload.type}")
             if (payload.type == Payload.Type.STREAM) {
                 val stream = payload.asStream()?.asInputStream()
                 if (stream != null) {
                     activeSocket?.inputStreamWrapper = stream
-                    Log.i(TAG, "Car stream received — input ready")
+                    CompanionLog.i(TAG, "Car stream received — input ready")
                 }
             }
         }
 
         override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
             if (update.status == PayloadTransferUpdate.Status.FAILURE) {
-                Log.e(TAG, "Payload transfer FAILED: id=${update.payloadId}")
+                CompanionLog.e(TAG, "Payload transfer FAILED: id=${update.payloadId}")
             }
         }
     }
@@ -183,12 +183,12 @@ class NearbyAdvertiser(
                     preConnectedSocket = socket,
                     listener = object : AaProxy.Listener {
                         override fun onConnected() {
-                            Log.i(TAG, "AA flowing through proxy")
+                            CompanionLog.i(TAG, "AA flowing through proxy")
                             stateListener.onProxyConnected()
                         }
 
                         override fun onDisconnected() {
-                            Log.i(TAG, "AA proxy disconnected")
+                            CompanionLog.i(TAG, "AA proxy disconnected")
                             stateListener.onProxyDisconnected()
                         }
                     },
@@ -213,7 +213,7 @@ class NearbyAdvertiser(
                     putExtra("projection_port", localPort)
                 }
 
-                Log.i(TAG, "Launching AA via TransparentTrigger, proxy port=$localPort")
+                CompanionLog.i(TAG, "Launching AA via TransparentTrigger, proxy port=$localPort")
                 val triggerIntent = Intent(context, TransparentTriggerActivity::class.java).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
                     putExtra("intent", aaIntent)
@@ -225,13 +225,13 @@ class NearbyAdvertiser(
                 delay(30_000)
                 val currentProxy = activeProxy
                 if (currentProxy != null && !currentProxy.hasActiveBridge()) {
-                    Log.w(TAG, "Launch timed out — AA never connected to proxy")
+                    CompanionLog.w(TAG, "Launch timed out — AA never connected to proxy")
                     currentProxy.stop()
                     activeProxy = null
                     stateListener.onLaunchTimeout()
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Launch failed: ${e.message}")
+                CompanionLog.e(TAG, "Launch failed: ${e.message}")
                 activeProxy?.stop()
                 activeProxy = null
             } finally {

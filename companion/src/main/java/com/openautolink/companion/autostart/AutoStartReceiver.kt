@@ -5,9 +5,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.util.Log
 import androidx.core.content.ContextCompat
 import com.openautolink.companion.CompanionPrefs
+import com.openautolink.companion.diagnostics.CompanionLog
 import com.openautolink.companion.service.CompanionService
 
 /**
@@ -36,7 +36,7 @@ class AutoStartReceiver : BroadcastReceiver() {
 
         when (intent.action) {
             BluetoothDevice.ACTION_ACL_CONNECTED -> {
-                Log.i(TAG, "Target BT connected: $deviceAddress")
+                CompanionLog.i(TAG, "Target BT connected: $deviceAddress")
 
                 // Check if device is fully connected (not just ACL)
                 val isFullyConnected = try {
@@ -47,26 +47,26 @@ class AutoStartReceiver : BroadcastReceiver() {
                 }
 
                 if (!isFullyConnected) {
-                    Log.w(TAG, "ACL up but isConnected()=false, skipping")
+                    CompanionLog.w(TAG, "ACL up but isConnected()=false, skipping")
                     return
                 }
 
-                Log.i(TAG, "Starting CompanionService via BT auto-start")
+                CompanionLog.i(TAG, "Starting CompanionService via BT auto-start")
                 val serviceIntent = Intent(context, CompanionService::class.java).apply {
                     action = CompanionService.ACTION_START
                 }
                 try {
                     ContextCompat.startForegroundService(context, serviceIntent)
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to start service: ${e.message}")
+                    CompanionLog.e(TAG, "Failed to start service: ${e.message}")
                 }
             }
 
             BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
-                Log.i(TAG, "Target BT disconnected: $deviceAddress")
+                CompanionLog.i(TAG, "Target BT disconnected: $deviceAddress")
                 val stopOnDisconnect = prefs.getBoolean(CompanionPrefs.BT_DISCONNECT_STOP, false)
                 if (stopOnDisconnect) {
-                    Log.i(TAG, "Stopping service (bt_disconnect_stop=true)")
+                    CompanionLog.i(TAG, "Stopping service (bt_disconnect_stop=true)")
                     val serviceIntent = Intent(context, CompanionService::class.java).apply {
                         action = CompanionService.ACTION_STOP
                     }

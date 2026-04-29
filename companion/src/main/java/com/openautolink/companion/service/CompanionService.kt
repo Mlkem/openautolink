@@ -9,11 +9,12 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.PowerManager
-import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.openautolink.companion.CompanionPrefs
 import com.openautolink.companion.MainActivity
 import com.openautolink.companion.R
+import com.openautolink.companion.diagnostics.CompanionFileLogger
+import com.openautolink.companion.diagnostics.CompanionLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -35,9 +36,12 @@ class CompanionService : Service(), NearbyAdvertiser.StateListener {
     private var tcpAdvertiser: TcpAdvertiser? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var multicastLock: android.net.wifi.WifiManager.MulticastLock? = null
+    private var fileLogger: CompanionFileLogger? = null
 
     override fun onCreate() {
         super.onCreate()
+        _instance = this
+        CompanionLog.init(com.openautolink.companion.BuildConfig.VERSION_NAME)
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, createNotification("Starting..."))
         // Hold multicast lock for mDNS discovery (some OEMs filter multicast when screen off)
@@ -47,16 +51,16 @@ class CompanionService : Service(), NearbyAdvertiser.StateListener {
                 setReferenceCounted(false)
                 acquire()
             }
-            Log.d(TAG, "MulticastLock acquired")
+            CompanionLog.d(TAG, "MulticastLock acquired")
         } catch (e: Exception) {
-            Log.w(TAG, "MulticastLock failed: ${e.message}")
+            CompanionLog.w(TAG, "MulticastLock failed: ${e.message}")
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                Log.i(TAG, "Stop requested")
+                CompanionLog.i(TAG, "Stop requested")
                 _isRunning.value = false
                 _isConnected.value = false
                 _statusText.value = "Stopped"
@@ -64,7 +68,7 @@ class CompanionService : Service(), NearbyAdvertiser.StateListener {
             }
 
             ACTION_START -> {
-                Log.i(TAG, "Start requested")
+                CompanionLog.i(TAG, "Start requested")
                 _isRunning.value = true
                 _isConnected.value = false
                 _statusText.value = "Advertising..."
@@ -74,7 +78,7 @@ class CompanionService : Service(), NearbyAdvertiser.StateListener {
             else -> {
                 // System restart
                 if (_isRunning.value) {
-                    Log.i(TAG, "Service restarted by system, resuming")
+                    CompanionLog.i(TAG, "Service restarted by system, resuming")
                     startNearby()
                 }
             }
@@ -92,13 +96,13 @@ class CompanionService : Service(), NearbyAdvertiser.StateListener {
 
         when (mode) {
             CompanionPrefs.TRANSPORT_TCP -> {
-                Log.i(TAG, "Transport mode: TCP (hotspot)")
+                CompanionLog.i(TAG, "Transport mode: TCP (hotspot)")
                 tcpAdvertiser = TcpAdvertiser(this, this)
                 tcpAdvertiser?.start()
                 updateNotification("TCP: waiting for car on port ${TcpAdvertiser.PORT}...")
             }
             else -> {
-                Log.i(TAG, "Transport mode: Nearby")
+                CompanionLog.i(TAG, "Transport mode: Nearby")
                 nearbyAdvertiser = NearbyAdvertiser(this, serviceScope, this)
                 nearbyAdvertiser?.start()
                 updateNotification("Nearby: searching for car...")
@@ -123,14 +127,14 @@ class CompanionService : Service(), NearbyAdvertiser.StateListener {
     override fun onProxyDisconnected() {
         _isConnected.value = false
         _statusText.value = "Disconnected"
-        Log.i(TAG, "AA proxy disconnected")
+        CompanionLog.i(TAG, "AA proxy disconnected")
         updateNotification("Disconnected — tap Start to retry")
         // Auto-reconnect disabled during development to avoid interfering
         // with the phone's AA session lifecycle.
     }
 
     override fun onLaunchTimeout() {
-        Log.i(TAG, "Launch timeout — waiting for AA to connect to proxy")
+        CompanionLog.i(TAG, "Launch timeout — waiting for AA to connect to proxy")
         // Don't restart — the proxy is still listening, AA may connect late.
     }
 
@@ -198,16 +202,41 @@ class CompanionService : Service(), NearbyAdvertiser.StateListener {
         _statusText.value = "Stopped"
         nearbyAdvertiser?.stop()
         tcpAdvertiser?.stop()
+        stopFileLogging()
         releaseWakeLock()
         if (multicastLock?.isHeld == true) {
             multicastLock?.release()
-            Log.d(TAG, "MulticastLock released")
+            CompanionLog.d(TAG, "MulticastLock released")
         }
         serviceScope.cancel()
+        _instance = null
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?) = null
+
+    // ── File logging ───────────────────────────────────────────────────
+
+    fun startFileLogging() {
+        if (fileLogger?.isActive?.value == true) return
+        val logger = CompanionFileLogger(this)
+        val path = logger.start()
+        if (path != null) {
+            fileLogger = logger
+            CompanionLog.fileLogger = logger
+            _fileLoggingActive.value = true
+            _fileLoggingPath.value = path
+            CompanionLog.i(TAG, "File logging enabled: $path")
+        }
+    }
+
+    fun stopFileLogging() {
+        CompanionLog.fileLogger = null
+        fileLogger?.stop()
+        fileLogger = null
+        _fileLoggingActive.value = false
+        _fileLoggingPath.value = null
+    }
 
     companion object {
         private const val TAG = "OAL_Service"
@@ -226,5 +255,15 @@ class CompanionService : Service(), NearbyAdvertiser.StateListener {
 
         private val _statusText = MutableStateFlow("Stopped")
         val statusText: kotlinx.coroutines.flow.StateFlow<String> = _statusText
+
+        private val _fileLoggingActive = MutableStateFlow(false)
+        val fileLoggingActive: kotlinx.coroutines.flow.StateFlow<Boolean> = _fileLoggingActive
+
+        private val _fileLoggingPath = MutableStateFlow<String?>(null)
+        val fileLoggingPath: kotlinx.coroutines.flow.StateFlow<String?> = _fileLoggingPath
+
+        @Volatile
+        private var _instance: CompanionService? = null
+        val instance: CompanionService? get() = _instance
     }
 }

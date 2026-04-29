@@ -4,8 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
-import android.util.Log
 import com.openautolink.companion.connection.AaProxy
+import com.openautolink.companion.diagnostics.CompanionLog
 import com.openautolink.companion.trigger.TransparentTriggerActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,7 +50,7 @@ class TcpAdvertiser(
     fun start() {
         if (isRunning) return
         isRunning = true
-        Log.i(TAG, "Starting TCP server on port $PORT")
+        CompanionLog.i(TAG, "Starting TCP server on port $PORT")
 
         scope.launch {
             try {
@@ -58,19 +58,19 @@ class TcpAdvertiser(
                 server.reuseAddress = true
                 server.bind(InetSocketAddress(PORT))
                 serverSocket = server
-                Log.i(TAG, "Listening on 0.0.0.0:$PORT")
+                CompanionLog.i(TAG, "Listening on 0.0.0.0:$PORT")
 
                 registerNsd()
 
                 while (isRunning) {
                     val carSocket = server.accept()
-                    Log.i(TAG, "Car connected from ${carSocket.inetAddress.hostAddress}")
+                    CompanionLog.i(TAG, "Car connected from ${carSocket.inetAddress.hostAddress}")
                     stateListener.onConnecting()
                     handleCarConnection(carSocket)
                 }
             } catch (e: Exception) {
                 if (isRunning) {
-                    Log.e(TAG, "TCP server error: ${e.message}")
+                    CompanionLog.e(TAG, "TCP server error: ${e.message}")
                 }
             }
         }
@@ -96,12 +96,12 @@ class TcpAdvertiser(
                     preConnectedSocket = carSocket,
                     listener = object : AaProxy.Listener {
                         override fun onConnected() {
-                            Log.i(TAG, "AA flowing through TCP proxy")
+                            CompanionLog.i(TAG, "AA flowing through TCP proxy")
                             stateListener.onProxyConnected()
                         }
 
                         override fun onDisconnected() {
-                            Log.i(TAG, "AA TCP proxy disconnected")
+                            CompanionLog.i(TAG, "AA TCP proxy disconnected")
                             stateListener.onProxyDisconnected()
                             // Re-accept next connection
                             isLaunching = false
@@ -127,7 +127,7 @@ class TcpAdvertiser(
                     putExtra("projection_port", localPort)
                 }
 
-                Log.i(TAG, "Launching AA via TransparentTrigger, proxy port=$localPort")
+                CompanionLog.i(TAG, "Launching AA via TransparentTrigger, proxy port=$localPort")
                 val triggerIntent =
                     Intent(context, TransparentTriggerActivity::class.java).apply {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
@@ -138,7 +138,7 @@ class TcpAdvertiser(
                 // Don't call onLaunchTimeout — that's for Nearby retry logic.
                 // TCP stays connected; AA will connect to the proxy when ready.
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to launch AA: ${e.message}")
+                CompanionLog.e(TAG, "Failed to launch AA: ${e.message}")
                 isLaunching = false
                 stateListener.onProxyDisconnected()
             }
@@ -146,7 +146,7 @@ class TcpAdvertiser(
     }
 
     fun stop() {
-        Log.i(TAG, "Stopping TCP server")
+        CompanionLog.i(TAG, "Stopping TCP server")
         isRunning = false
         unregisterNsd()
         activeProxy?.stop()
@@ -168,21 +168,21 @@ class TcpAdvertiser(
             }
             nsdRegistrationListener = object : NsdManager.RegistrationListener {
                 override fun onRegistrationFailed(si: NsdServiceInfo, errorCode: Int) {
-                    Log.w(TAG, "mDNS registration failed: error $errorCode")
+                    CompanionLog.w(TAG, "mDNS registration failed: error $errorCode")
                 }
                 override fun onUnregistrationFailed(si: NsdServiceInfo, errorCode: Int) {
-                    Log.w(TAG, "mDNS unregistration failed: error $errorCode")
+                    CompanionLog.w(TAG, "mDNS unregistration failed: error $errorCode")
                 }
                 override fun onServiceRegistered(si: NsdServiceInfo) {
-                    Log.i(TAG, "mDNS registered: ${si.serviceName} on port $PORT")
+                    CompanionLog.i(TAG, "mDNS registered: ${si.serviceName} on port $PORT")
                 }
                 override fun onServiceUnregistered(si: NsdServiceInfo) {
-                    Log.d(TAG, "mDNS unregistered")
+                    CompanionLog.d(TAG, "mDNS unregistered")
                 }
             }
             nsdManager?.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, nsdRegistrationListener)
         } catch (e: Exception) {
-            Log.w(TAG, "mDNS registration failed: ${e.message}")
+            CompanionLog.w(TAG, "mDNS registration failed: ${e.message}")
         }
     }
 

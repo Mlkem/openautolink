@@ -3,7 +3,7 @@ package com.openautolink.companion.autostart
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
+import com.openautolink.companion.diagnostics.CompanionLog
 
 /**
  * Receives WiFi state change broadcasts from ConnectivityManager's
@@ -12,7 +12,7 @@ import android.util.Log
  */
 class WifiReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        Log.d(TAG, "WiFi state change received")
+        CompanionLog.d(TAG, "WiFi state change received")
         WifiJobService.checkWifiAndStart(context)
     }
 

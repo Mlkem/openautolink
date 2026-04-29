@@ -4,7 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
+import com.openautolink.companion.diagnostics.CompanionLog
 
 /**
  * Transparent activity that surfaces the app to the foreground before
@@ -25,11 +25,11 @@ class TransparentTriggerActivity : Activity() {
         }
 
         if (targetIntent != null) {
-            Log.i(TAG, "Launching AA via Activity...")
+            CompanionLog.i(TAG, "Launching AA via Activity...")
             try {
                 startActivity(targetIntent)
             } catch (e: Exception) {
-                Log.w(TAG, "Activity launch failed: ${e.message}. Trying broadcast fallback...")
+                CompanionLog.w(TAG, "Activity launch failed: ${e.message}. Trying broadcast fallback...")
                 try {
                     val port = targetIntent.getIntExtra("PARAM_SERVICE_PORT", 5288)
                     val receiverIntent = Intent().apply {
@@ -43,9 +43,9 @@ class TransparentTriggerActivity : Activity() {
                         addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
                     }
                     sendBroadcast(receiverIntent)
-                    Log.i(TAG, "Broadcast fallback sent")
+                    CompanionLog.i(TAG, "Broadcast fallback sent")
                 } catch (e2: Exception) {
-                    Log.e(TAG, "Both triggers failed: ${e.message} / ${e2.message}")
+                    CompanionLog.e(TAG, "Both triggers failed: ${e.message} / ${e2.message}")
                 }
             }
         }

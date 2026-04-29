@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -296,6 +297,13 @@ fun MainScreen(
             HorizontalDivider()
             Spacer(Modifier.height(20.dp))
 
+            // ── File Logging ───────────────────────────────────────
+            FileLoggingSection()
+
+            Spacer(Modifier.height(28.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(20.dp))
+
             // ── Deep Link Info ─────────────────────────────────────
             Text(
                 text = "Deep Links",
@@ -564,6 +572,100 @@ private fun WifiAutoStartConfig(ssids: String, onSsidsChanged: (String) -> Unit)
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
+
+@Composable
+private fun FileLoggingSection() {
+    val context = LocalContext.current
+    val isServiceRunning by CompanionService.isRunning.collectAsState()
+    val fileLoggingActive by CompanionService.fileLoggingActive.collectAsState()
+    val fileLoggingPath by CompanionService.fileLoggingPath.collectAsState()
+
+    Text(
+        text = "File Logging",
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(Modifier.height(8.dp))
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Outlined.Description,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = if (fileLoggingActive) OalGreen
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = if (fileLoggingActive) "Logging active" else "Log to file",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                Switch(
+                    checked = fileLoggingActive,
+                    enabled = isServiceRunning,
+                    onCheckedChange = { enabled ->
+                        val service = getCompanionService(context)
+                        if (service != null) {
+                            if (enabled) service.startFileLogging()
+                            else service.stopFileLogging()
+                        }
+                    },
+                )
+            }
+
+            if (!isServiceRunning && !fileLoggingActive) {
+                Text(
+                    text = "Start the service first to enable logging.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            if (fileLoggingActive && fileLoggingPath != null) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = fileLoggingPath!!,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Saves OAL logs + logcat to internal storage. " +
+                    "Access via Files app → Android/data/com.openautolink.companion/",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * Get the CompanionService instance if it's running.
+ * Uses [Context.getSystemService]-style lookup via the service connection.
+ * Since CompanionService is a started (not bound) service, we access it
+ * by sending intents. But for toggle we need the instance directly.
+ * We use a simple companion-object reference set in onCreate.
+ */
+private fun getCompanionService(context: Context): CompanionService? {
+    // We'll add a static instance ref to CompanionService
+    return CompanionService.instance
+}
 
 @Composable
 private fun SwitchRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {

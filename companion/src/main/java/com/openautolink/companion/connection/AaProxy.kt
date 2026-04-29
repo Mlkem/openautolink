@@ -1,6 +1,6 @@
 package com.openautolink.companion.connection
 
-import android.util.Log
+import com.openautolink.companion.diagnostics.CompanionLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,18 +53,18 @@ class AaProxy(
         isRunning = true
 
         val localPort = server.localPort
-        Log.i(TAG, "Proxy listening on localhost:$localPort")
+        CompanionLog.i(TAG, "Proxy listening on localhost:$localPort")
 
         scope.launch {
             try {
                 while (isRunning) {
                     val aaSocket = server.accept()
-                    Log.i(TAG, "Android Auto connected to proxy")
+                    CompanionLog.i(TAG, "Android Auto connected to proxy")
                     launchBridge(aaSocket)
                 }
             } catch (e: Exception) {
                 if (e !is CancellationException) {
-                    Log.d(TAG, "Proxy server stopped: ${e.message}")
+                    CompanionLog.d(TAG, "Proxy server stopped: ${e.message}")
                 }
             }
         }
@@ -83,7 +83,7 @@ class AaProxy(
                     ?: throw IllegalStateException("No pre-connected socket available")
                 activeCarSocket = carSocket
 
-                Log.i(TAG, "Bridge established: AA <-> Car")
+                CompanionLog.i(TAG, "Bridge established: AA <-> Car")
 
                 val aaIn = aaSocket.getInputStream()
                 val aaOut = aaSocket.getOutputStream()
@@ -94,9 +94,9 @@ class AaProxy(
                 val job2 = launch { pump(carIn, aaOut, "Car->AA") }
                 joinAll(job1, job2)
             } catch (e: Exception) {
-                Log.e(TAG, "Bridge error: ${e.message}")
+                CompanionLog.e(TAG, "Bridge error: ${e.message}")
             } finally {
-                Log.i(TAG, "Bridge closed")
+                CompanionLog.i(TAG, "Bridge closed")
                 activeCarSocket = null
                 runCatching { aaSocket.close() }
                 // Don't close carSocket here — let the NearbyAdvertiser manage it via cleanup()
@@ -118,7 +118,7 @@ class AaProxy(
                     output.flush()
                 }
             } catch (e: Exception) {
-                Log.d(TAG, "$name error: ${e.message}")
+                CompanionLog.d(TAG, "$name error: ${e.message}")
             }
         }
 
@@ -142,12 +142,12 @@ class AaProxy(
         val socket = activeCarSocket ?: return
         Thread {
             try {
-                Log.i(TAG, "Sending disconnect signal")
+                CompanionLog.i(TAG, "Sending disconnect signal")
                 val signal = ByteArray(16) { 0xFF.toByte() }
                 socket.getOutputStream().write(signal)
                 socket.getOutputStream().flush()
             } catch (e: Exception) {
-                Log.w(TAG, "Disconnect signal failed: ${e.message}")
+                CompanionLog.w(TAG, "Disconnect signal failed: ${e.message}")
             }
         }.start()
     }
