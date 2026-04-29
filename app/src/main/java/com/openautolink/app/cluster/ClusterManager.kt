@@ -44,6 +44,7 @@ class ClusterManager(private val context: Context) {
     private val handler = Handler(Looper.getMainLooper())
     private var enabled = false
     private var healthRetryCount = 0
+    private var relaunching = false
 
     /**
      * Enable or disable the cluster CarAppService component.
@@ -151,13 +152,15 @@ class ClusterManager(private val context: Context) {
             if (ClusterBindingState.sessionAlive) {
                 Log.i(TAG, "Health check: cluster session alive")
                 healthRetryCount = 0
+                relaunching = false
                 return@postDelayed
             }
             healthRetryCount++
             if (healthRetryCount > MAX_HEALTH_RETRIES) {
-                Log.w(TAG, "Health check: max retries ($MAX_HEALTH_RETRIES) exceeded — giving up")
+                Log.w(TAG, "Health check: max retries ($MAX_HEALTH_RETRIES) exceeded \u2014 giving up")
                 DiagnosticLog.w("cluster", "Cluster binding failed after $MAX_HEALTH_RETRIES retries")
                 healthRetryCount = 0
+                relaunching = false
                 return@postDelayed
             }
             Log.w(TAG, "Health check: session not alive — retry $healthRetryCount/$MAX_HEALTH_RETRIES")
@@ -202,9 +205,11 @@ class ClusterManager(private val context: Context) {
     fun ensureAlive() {
         if (!enabled) return
         if (ClusterBindingState.sessionAlive) return
+        if (relaunching) return
 
-        Log.w(TAG, "Cluster session not alive — relaunching binding")
-        DiagnosticLog.w("cluster", "Cluster session not alive — relaunching binding")
+        Log.w(TAG, "Cluster session not alive \u2014 relaunching binding")
+        DiagnosticLog.w("cluster", "Cluster session not alive \u2014 relaunching binding")
+        relaunching = true
         restartClusterBinding()
     }
 
@@ -215,5 +220,6 @@ class ClusterManager(private val context: Context) {
         setClusterEnabled(false)
         handler.removeCallbacksAndMessages(null)
         healthRetryCount = 0
+        relaunching = false
     }
 }

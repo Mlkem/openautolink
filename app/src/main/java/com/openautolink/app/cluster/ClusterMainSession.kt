@@ -180,9 +180,10 @@ class ClusterMainSession : Session() {
             try {
                 val trip = buildTrip(maneuver)
                 navManager.updateTrip(trip)
-                Log.d(TAG, "Trip relayed: ${maneuver.type}, dist=${maneuver.distanceMeters}m, road=${maneuver.roadName}")
+                DiagnosticLog.d("cluster", "Trip: ${maneuver.type} dist=${maneuver.distanceMeters}m road=${maneuver.roadName} lanes=${maneuver.lanes?.size ?: 0}")
             } catch (e: Exception) {
                 Log.e(TAG, "updateTrip() failed: ${e.message}")
+                DiagnosticLog.e("cluster", "updateTrip() failed: ${e.message}")
             }
 
             // Arrival timeout for terminal maneuver types
