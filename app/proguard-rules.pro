@@ -30,6 +30,9 @@
 -keep class * implements com.openautolink.app.transport.aasdk.AasdkSessionCallback { *; }
 -keep class com.openautolink.app.transport.aasdk.AasdkNative { *; }
 
+# DiagnosticLog — native code calls nativeLog() via FindClass + CallStaticVoidMethod
+-keep class com.openautolink.app.diagnostics.DiagnosticLog { *; }
+
 # Conscrypt SSL provider — suppress warnings for optional platform classes
 -dontwarn com.android.org.conscrypt.SSLParametersImpl
 -dontwarn org.apache.harmony.xnet.provider.jsse.SSLParametersImpl
