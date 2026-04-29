@@ -62,4 +62,10 @@ class AasdkSdrConfig(
 
     /** Physical pixel density of the AAOS display (from DisplayMetrics.densityDpi). */
     @JvmField val realDensity: Int = 0,
+
+    /** AA stable content insets — tells phone where to keep UI inside. */
+    @JvmField val safeAreaTop: Int = 0,
+    @JvmField val safeAreaBottom: Int = 0,
+    @JvmField val safeAreaLeft: Int = 0,
+    @JvmField val safeAreaRight: Int = 0,
 )

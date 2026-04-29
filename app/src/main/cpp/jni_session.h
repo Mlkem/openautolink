@@ -281,6 +281,10 @@ private:
         bool autoNegotiate = true;
         std::string videoCodec = "h265";
         int realDensity = 0;
+        int safeAreaTop = 0;
+        int safeAreaBottom = 0;
+        int safeAreaLeft = 0;
+        int safeAreaRight = 0;
     };
     SdrConfig sdrConfig_;
 

@@ -192,6 +192,10 @@ void JniSession::start(JNIEnv* env, jobject transportPipe, jobject callback, job
     sdrConfig_.autoNegotiate = env->GetBooleanField(sdrConfig, env->GetFieldID(sdrClass, "autoNegotiate", "Z"));
     sdrConfig_.videoCodec = readString("videoCodec");
     sdrConfig_.realDensity = env->GetIntField(sdrConfig, env->GetFieldID(sdrClass, "realDensity", "I"));
+    sdrConfig_.safeAreaTop = env->GetIntField(sdrConfig, env->GetFieldID(sdrClass, "safeAreaTop", "I"));
+    sdrConfig_.safeAreaBottom = env->GetIntField(sdrConfig, env->GetFieldID(sdrClass, "safeAreaBottom", "I"));
+    sdrConfig_.safeAreaLeft = env->GetIntField(sdrConfig, env->GetFieldID(sdrClass, "safeAreaLeft", "I"));
+    sdrConfig_.safeAreaRight = env->GetIntField(sdrConfig, env->GetFieldID(sdrClass, "safeAreaRight", "I"));
     env->DeleteLocalRef(sdrClass);
 
     LOGI("Starting session: video=%dx%d@%dfps dpi=%d realDpi=%d pixelAspect=%d autoNeg=%d codec=%s",
@@ -199,6 +203,12 @@ void JniSession::start(JNIEnv* env, jobject transportPipe, jobject callback, job
          sdrConfig_.videoFps, sdrConfig_.videoDpi, sdrConfig_.realDensity,
          sdrConfig_.pixelAspectE4, sdrConfig_.autoNegotiate,
          sdrConfig_.videoCodec.c_str());
+    if (sdrConfig_.safeAreaTop > 0 || sdrConfig_.safeAreaBottom > 0 ||
+        sdrConfig_.safeAreaLeft > 0 || sdrConfig_.safeAreaRight > 0) {
+        LOGI("Safe area insets: top=%d bottom=%d left=%d right=%d",
+             sdrConfig_.safeAreaTop, sdrConfig_.safeAreaBottom,
+             sdrConfig_.safeAreaLeft, sdrConfig_.safeAreaRight);
+    }
 
     // Create JNI transport from the Nearby stream pipe
     transport_ = std::make_shared<JniTransport>(*ioService_, jvm_, transportRef);
@@ -914,6 +924,18 @@ void JniSession::buildServiceDiscoveryResponse(
       else res = VRes::VIDEO_3840x2160;
       auto fps = sdrConfig_.videoFps >= 60 ? VFps::VIDEO_FPS_60 : VFps::VIDEO_FPS_30;
 
+      bool hasSafeArea = sdrConfig_.safeAreaTop > 0 || sdrConfig_.safeAreaBottom > 0 ||
+                         sdrConfig_.safeAreaLeft > 0 || sdrConfig_.safeAreaRight > 0;
+      auto applySafeArea = [&](auto* vc) {
+          if (hasSafeArea) {
+              auto* insets = vc->mutable_ui_config()->mutable_content_insets();
+              if (sdrConfig_.safeAreaTop > 0) insets->set_top(sdrConfig_.safeAreaTop);
+              if (sdrConfig_.safeAreaBottom > 0) insets->set_bottom(sdrConfig_.safeAreaBottom);
+              if (sdrConfig_.safeAreaLeft > 0) insets->set_left(sdrConfig_.safeAreaLeft);
+              if (sdrConfig_.safeAreaRight > 0) insets->set_right(sdrConfig_.safeAreaRight);
+          }
+      };
+
       if (sdrConfig_.autoNegotiate) {
           // Auto mode: H.265 at all tiers, then H.264 fallback
           int tiers[] = {5, 4, 3, 2, 1};
@@ -926,6 +948,7 @@ void JniSession::buildServiceDiscoveryResponse(
               if (sdrConfig_.marginWidth > 0) vc->set_width_margin(sdrConfig_.marginWidth);
               if (sdrConfig_.marginHeight > 0) vc->set_height_margin(sdrConfig_.marginHeight);
               if (sdrConfig_.pixelAspectE4 > 0) vc->set_pixel_aspect_ratio_e4(sdrConfig_.pixelAspectE4);
+              applySafeArea(vc);
           }
           for (int t : {3, 2, 1}) {
               auto* vc = ms->add_video_configs();
@@ -936,6 +959,7 @@ void JniSession::buildServiceDiscoveryResponse(
               if (sdrConfig_.marginWidth > 0) vc->set_width_margin(sdrConfig_.marginWidth);
               if (sdrConfig_.marginHeight > 0) vc->set_height_margin(sdrConfig_.marginHeight);
               if (sdrConfig_.pixelAspectE4 > 0) vc->set_pixel_aspect_ratio_e4(sdrConfig_.pixelAspectE4);
+              applySafeArea(vc);
           }
       } else {
           // Manual mode: single config at the selected resolution and codec
@@ -950,6 +974,7 @@ void JniSession::buildServiceDiscoveryResponse(
           if (sdrConfig_.marginWidth > 0) vc->set_width_margin(sdrConfig_.marginWidth);
           if (sdrConfig_.marginHeight > 0) vc->set_height_margin(sdrConfig_.marginHeight);
           if (sdrConfig_.pixelAspectE4 > 0) vc->set_pixel_aspect_ratio_e4(sdrConfig_.pixelAspectE4);
+          applySafeArea(vc);
       }
     }
 

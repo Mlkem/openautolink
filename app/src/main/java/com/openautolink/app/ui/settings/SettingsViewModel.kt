@@ -366,6 +366,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             val volAssistant = preferences.volumeOffsetAssistant.first()
             val manualIpEnabled = preferences.manualIpEnabled.first()
             val manualIp = if (manualIpEnabled) preferences.manualIpAddress.first().takeIf { it.isNotBlank() } else null
+            val saTop = preferences.safeAreaTop.first()
+            val saBottom = preferences.safeAreaBottom.first()
+            val saLeft = preferences.safeAreaLeft.first()
+            val saRight = preferences.safeAreaRight.first()
             sm.start(
                 codecPreference = codec,
                 micSourcePreference = micSrc,
@@ -388,6 +392,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 volumeOffsetNavigation = volNav,
                 volumeOffsetAssistant = volAssistant,
                 manualIpAddress = manualIp,
+                safeAreaTop = saTop,
+                safeAreaBottom = saBottom,
+                safeAreaLeft = saLeft,
+                safeAreaRight = saRight,
             )
         }
     }

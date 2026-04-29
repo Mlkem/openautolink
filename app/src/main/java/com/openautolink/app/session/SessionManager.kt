@@ -234,6 +234,10 @@ class SessionManager(
         volumeOffsetNavigation: Int = 0,
         volumeOffsetAssistant: Int = 0,
         manualIpAddress: String? = null,
+        safeAreaTop: Int = 0,
+        safeAreaBottom: Int = 0,
+        safeAreaLeft: Int = 0,
+        safeAreaRight: Int = 0,
     ) {
         micSource = micSourcePreference
         observeJob?.cancel()
@@ -362,7 +366,8 @@ class SessionManager(
                 videoAutoNegotiate, codecPreference, aaResolution, aaDpi,
                 aaWidthMargin, aaHeightMargin, aaPixelAspect, videoFps,
                 driveSide, hideClock, hideSignal, hideBattery, scalingMode,
-                manualIpAddress)
+                manualIpAddress,
+                safeAreaTop, safeAreaBottom, safeAreaLeft, safeAreaRight)
         }
     }
 
@@ -375,6 +380,7 @@ class SessionManager(
         hideClock: Boolean = false, hideSignal: Boolean = false, hideBattery: Boolean = false,
         scalingMode: String = "letterbox",
         manualIpAddress: String? = null,
+        safeAreaTop: Int = 0, safeAreaBottom: Int = 0, safeAreaLeft: Int = 0, safeAreaRight: Int = 0,
     ) {
         aasdkSession?.stop()
         _transportMode.value = directTransport
@@ -491,6 +497,10 @@ class SessionManager(
             autoNegotiate = videoAutoNegotiate,
             videoCodec = codec,
             // realDensity removed — interferes with pixel_aspect_ratio_e4 on some AA versions
+            safeAreaTop = safeAreaTop,
+            safeAreaBottom = safeAreaBottom,
+            safeAreaLeft = safeAreaLeft,
+            safeAreaRight = safeAreaRight,
         )
         _touchWidth.value = resW
         _touchHeight.value = resH

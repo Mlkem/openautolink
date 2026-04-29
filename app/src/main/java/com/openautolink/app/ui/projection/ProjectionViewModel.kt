@@ -259,6 +259,12 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
             val hideSignal = preferences.hidePhoneSignal.first()
             val hideBattery = preferences.hideBatteryLevel.first()
 
+            // Safe area insets
+            val saTop = preferences.safeAreaTop.first()
+            val saBottom = preferences.safeAreaBottom.first()
+            val saLeft = preferences.safeAreaLeft.first()
+            val saRight = preferences.safeAreaRight.first()
+
             // Load key remap from preferences
             val keyRemapJson = preferences.keyRemap.first()
             if (keyRemapJson.isNotBlank()) {
@@ -309,6 +315,10 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
                 volumeOffsetNavigation = volNav,
                 volumeOffsetAssistant = volAssistant,
                 manualIpAddress = manualIp,
+                safeAreaTop = saTop,
+                safeAreaBottom = saBottom,
+                safeAreaLeft = saLeft,
+                safeAreaRight = saRight,
             )
         }
     }
