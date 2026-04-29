@@ -36,6 +36,13 @@ class MediaCodecDecoder(
         private const val INPUT_TIMEOUT_BEHIND_US = 5000L // 5ms — shorter when catching up
         private const val OUTPUT_TIMEOUT_US = 1000L // 1ms timeout for output drain
         private const val STATS_INTERVAL_MS = 500L
+        // Minimum IDR size to be considered a real picture (not encoder startup seed).
+        // Real IDRs at any supported resolution are 50KB+. Seed IDRs are ~900 bytes.
+        private const val MIN_REAL_IDR_BYTES = 4096
+        // After accepting a seed IDR, silently decode P-frames for this long before
+        // rendering. Gives the decoder time to accumulate picture content from P-frames
+        // so the first visible frame is mostly complete rather than green.
+        private const val SEED_WARMUP_MS = 2500L
     }
 
     private val _decoderState = MutableStateFlow(DecoderState.IDLE)
@@ -108,6 +115,12 @@ class MediaCodecDecoder(
     // Late frame tracking — PTS monotonicity
     @Volatile private var lastQueuedPtsMs = -1L
     private var consecutiveDrops = 0
+
+    // Seed IDR warmup: when a tiny seed IDR is accepted, we decode P-frames
+    // silently for SEED_WARMUP_MS before enabling rendering. This avoids
+    // showing green (uninitialized decoder buffer) while still getting
+    // near-instant video once the warmup completes.
+    @Volatile private var seedIdrTimeMs = 0L
 
     // Render gate: don't render output until after a valid keyframe has been
     // queued to the decoder. Prevents green/blocky frames from P-frames
@@ -327,17 +340,22 @@ class MediaCodecDecoder(
                 }
             }
         }
-        // Guard against tiny "seed" IDRs from the phone's encoder startup.
-        // H.265 encoders often emit an 800-1500 byte placeholder IDR as their first
-        // output before producing a real picture. This decodes to green (empty chroma
-        // planes) and corrupts the display for 30-70 seconds until the next real IDR.
-        // Queue it to the decoder (maintains codec state) but DON'T enable rendering.
-        val minIdrBytes = 4096  // Real IDRs at any supported resolution are 50KB+
-        if (frame.data.size < minIdrBytes) {
-            Log.w(TAG, "IDR too small (${frame.data.size} bytes < $minIdrBytes) — likely encoder startup seed, queuing but not enabling render")
-            DiagnosticLog.w("video", "Tiny IDR rejected: ${frame.data.size}B < ${minIdrBytes}B, waiting for real IDR")
-            queueFrame(frame)  // Feed to decoder to maintain state
-            // Keep requesting a real IDR — don't set receivedIdr or renderingEnabled
+        // Guard against tiny "seed" IDRs from the phone's H.265 encoder startup.
+        // These ~900-byte placeholder IDRs decode to green (uninitialized chroma planes).
+        // Strategy: accept the seed IDR so P-frames can flow and build up picture content,
+        // but suppress rendering for SEED_WARMUP_MS. After warmup, enough P-frame blocks
+        // have accumulated that the picture is mostly complete. A real IDR (when it arrives
+        // at the phone's natural GOP interval) will clean up any remaining artifacts.
+        if (frame.data.size < MIN_REAL_IDR_BYTES) {
+            Log.w(TAG, "Seed IDR detected (${frame.data.size} bytes < $MIN_REAL_IDR_BYTES) — silent decode for ${SEED_WARMUP_MS}ms before rendering")
+            DiagnosticLog.w("video", "Seed IDR: ${frame.data.size}B, warmup ${SEED_WARMUP_MS}ms")
+            queueFrame(frame)  // Feed to decoder — establishes reference for P-frames
+            receivedIdr = true  // Allow P-frames to flow to decoder
+            renderingEnabled = false  // Don't show green seed output
+            seedIdrTimeMs = System.currentTimeMillis()  // Start warmup timer
+            // Don't cache the seed IDR — if surface is recreated, we don't want
+            // to replay a green frame. Better to wait for a real one.
+            // Keep requesting a real IDR — the phone may eventually respond
             if (!_needsKeyframe) {
                 _needsKeyframe = true
                 _needsKeyframeFlow.value = true
@@ -364,13 +382,10 @@ class MediaCodecDecoder(
     }
 
     private fun handleRegularFrame(frame: VideoFrame) {
-        if (!receivedIdr || !renderingEnabled) {
-            // Drop P-frames entirely when:
-            // - No IDR received yet (can't decode without reference)
-            // - Rendering not enabled (between stale and fresh IDR after codec reset)
-            // CRITICAL: these frames must NOT be queued to the decoder — even with
-            // output rendering suppressed, they corrupt the decoder's reference
-            // picture buffer when they don't match the current IDR.
+        if (!receivedIdr) {
+            // No IDR received yet — P-frames can't decode without a reference.
+            // These MUST be dropped, not queued — they corrupt the decoder's
+            // reference picture buffer.
             framesDropped.incrementAndGet()
             updateDropStats()
             return
@@ -379,6 +394,22 @@ class MediaCodecDecoder(
             framesDropped.incrementAndGet()
             updateDropStats()
             return
+        }
+        // After a seed IDR, P-frames flow to the decoder (silent decode) and
+        // rendering is enabled after SEED_WARMUP_MS. The drain thread handles
+        // render suppression via the renderingEnabled flag — output buffers are
+        // dequeued and released without rendering, keeping the decoder pipeline
+        // active so picture content accumulates in the reference buffers.
+        if (!renderingEnabled && seedIdrTimeMs > 0) {
+            val elapsed = System.currentTimeMillis() - seedIdrTimeMs
+            if (elapsed >= SEED_WARMUP_MS) {
+                Log.i(TAG, "Seed warmup complete (${elapsed}ms) — enabling render")
+                DiagnosticLog.i("video", "Seed warmup done (${elapsed}ms), render enabled")
+                renderingEnabled = true
+                seedIdrTimeMs = 0  // Clear — warmup is done
+                _needsKeyframe = false
+                _needsKeyframeFlow.value = false
+            }
         }
         queueFrame(frame)
     }
@@ -724,6 +755,7 @@ class MediaCodecDecoder(
         codec = null
         receivedIdr = false
         renderingEnabled = false
+        seedIdrTimeMs = 0
         lastQueuedPtsMs = -1
         consecutiveDrops = 0
     }
