@@ -357,7 +357,11 @@ class VehicleDataForwarderImpl(
                 val pv = pmClass.getMethod("getProperty", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
                     .invoke(pm, propId, 0)
                 if (pv != null) {
+                    val initVal = try { pv.javaClass.getMethod("getValue").invoke(pv) } catch (_: Throwable) { null }
+                    DiagnosticLog.d("vhal", "${prop.fieldName}: initial read = $initVal")
                     handleChangeEvent(pv)
+                } else {
+                    DiagnosticLog.d("vhal", "${prop.fieldName}: initial read returned null")
                 }
             } catch (t: Throwable) {
                 DiagnosticLog.d("vhal", "${prop.fieldName}: initial read: ${t.rootCause().javaClass.simpleName}: ${t.rootCause().message}")
@@ -377,6 +381,7 @@ class VehicleDataForwarderImpl(
 
         Log.i(TAG, "Subscribed to $subscribed/${properties.size} vehicle properties")
         DiagnosticLog.i("vhal", "Subscribed to $subscribed/${properties.size} vehicle properties")
+        DiagnosticLog.i("vhal", "currentValues after subscription: ${currentValues.size} entries")
 
         // Fire initial data with all values populated from initial reads.
         // Reset lastSendTime to bypass throttle — earlier throttled sends during
@@ -484,6 +489,7 @@ class VehicleDataForwarderImpl(
             val propertyId = propertyValue.javaClass.getMethod("getPropertyId").invoke(propertyValue) as? Int ?: return
             if (propertyId !in trackedPropertyIds) return
             val value = propertyValue.javaClass.getMethod("getValue").invoke(propertyValue) ?: return
+            DiagnosticLog.d("vhal", "prop 0x${propertyId.toString(16)}: $value")
 
             // Detect ignition state transitions to ON(4)/START(5) for wake signaling
             val ignitionId = VEHICLE_PROPERTY_ID_FALLBACK["IGNITION_STATE"]
@@ -513,6 +519,7 @@ class VehicleDataForwarderImpl(
 
         val data = buildVehicleData()
         _latestVehicleData.value = data
+        DiagnosticLog.d("vhal", "throttledSend: speed=${data.speedKmh} gear=${data.gearRaw} evBatt=${data.evBatteryLevelWh} evCap=${data.evBatteryCapacityWh} range=${data.rangeKm}")
         sendMessage(data)
     }
 

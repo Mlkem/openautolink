@@ -288,6 +288,15 @@ class SessionManager(
                         )
                     }
                     vd.rpmE3?.let { session.sendRpm(it) }
+                    if (vd.evBatteryLevelWh != null || vd.evBatteryCapacityWh != null) {
+                        DiagnosticLog.i("vem", "sendEnergyModel: level=${vd.evBatteryLevelWh?.toInt()}Wh cap=${vd.evBatteryCapacityWh?.toInt()}Wh range=${((vd.rangeKm ?: 0f) * 1000).toInt()}m charge=${vd.evChargeRateW?.toInt()}W")
+                        session.sendEnergyModel(
+                            vd.evBatteryLevelWh?.toInt() ?: 0,
+                            vd.evBatteryCapacityWh?.toInt() ?: 0,
+                            ((vd.rangeKm ?: 0f) * 1000).toInt(),
+                            vd.evChargeRateW?.toInt() ?: 0
+                        )
+                    }
                 },
                 onIgnitionOn = { /* aasdk mode doesn't need ignition-based reconnect */ }
             )
@@ -318,20 +327,13 @@ class SessionManager(
             OalMediaBrowserService.updateSessionToken(token)
         }
 
-        // Enable cluster service (AAOS only — on regular Android, CarAppActivity
-        // steals focus from MainActivity and causes display issues)
-        val isAaos = context?.packageManager?.hasSystemFeature(
-            android.content.pm.PackageManager.FEATURE_AUTOMOTIVE) == true
+        // Enable cluster service — always enable so Templates Host can discover it.
+        // On non-AAOS devices Templates Host won't exist so the service simply won't bind.
         _clusterManager?.release()
-        if (isAaos) {
-            _clusterManager = context?.let { com.openautolink.app.cluster.ClusterManager(it) }
-            _clusterManager?.setClusterEnabled(true)
-            // Don't call launchClusterBinding() — let Templates Host discover the service
-            // via intent filter. This avoids CarAppActivity popping up on the main display.
-        } else {
-            OalLog.i(TAG, "Non-AAOS device — cluster service disabled")
-            _clusterManager = null
-        }
+        _clusterManager = context?.let { com.openautolink.app.cluster.ClusterManager(it) }
+        _clusterManager?.setClusterEnabled(true)
+        // Don't call launchClusterBinding() — let Templates Host discover the service
+        // via intent filter. This avoids CarAppActivity popping up on the main display.
 
         // Create diagnostics (local-only)
         _telemetryCollector?.stop()
