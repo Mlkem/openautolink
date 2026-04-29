@@ -64,6 +64,12 @@ sealed class ControlMessage {
         val albumArtBase64: String? = null
     ) : ControlMessage()
 
+    /** Playback state only — does NOT carry metadata fields to avoid wiping real metadata. */
+    data class MediaPlaybackState(
+        val playing: Boolean,
+        val positionMs: Long
+    ) : ControlMessage()
+
     // Error
     data class Error(val code: Int, val message: String) : ControlMessage()
 

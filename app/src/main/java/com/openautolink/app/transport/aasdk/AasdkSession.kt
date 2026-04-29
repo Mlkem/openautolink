@@ -452,12 +452,11 @@ class AasdkSession(
 
     override fun onMediaPlayback(state: Int, positionMs: Long) {
         scope.launch {
-            val playing = state == 1 // PLAYING
-            com.openautolink.app.diagnostics.DiagnosticLog.d("media", "Playback: ${if (playing) "PLAYING" else "PAUSED"} pos=${positionMs}ms")
-            _controlMessages.emit(ControlMessage.MediaMetadata(
-                title = null, artist = null, album = null,
-                durationMs = null, positionMs = positionMs,
-                playing = playing, albumArtBase64 = null
+            // AA proto: STOPPED=1, PLAYING=2, PAUSED=3
+            val playing = state == 2
+            com.openautolink.app.diagnostics.DiagnosticLog.d("media", "Playback: state=$state ${if (playing) "PLAYING" else if (state == 3) "PAUSED" else "STOPPED"} pos=${positionMs}ms")
+            _controlMessages.emit(ControlMessage.MediaPlaybackState(
+                playing = playing, positionMs = positionMs
             ))
         }
     }

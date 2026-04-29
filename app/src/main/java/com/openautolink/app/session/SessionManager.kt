@@ -981,6 +981,11 @@ class SessionManager(
                     )
                 }
             }
+            is ControlMessage.MediaPlaybackState -> {
+                _mediaSessionManager?.updatePlaybackState(
+                    playing = message.playing, positionMs = message.positionMs
+                )
+            }
             is ControlMessage.AudioStart -> {
                 _remoteDiagnostics?.log(DiagnosticLevel.INFO, "audio",
                     "Audio start: purpose=${message.purpose}, rate=${message.sampleRate}")
