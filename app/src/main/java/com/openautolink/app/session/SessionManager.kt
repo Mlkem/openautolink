@@ -491,6 +491,8 @@ class SessionManager(
             computedTargetLayoutWidthDp = aaTargetLayoutWidthDp
         }
 
+        OalLog.i(TAG, "SDR AR config: scalingMode=$scalingMode marginW=$computedWidthMargin marginH=$computedHeightMargin pixelAspectE4=$computedPixelAspect")
+
         val session = AasdkSession(scope, ctx)
         session.transportMode = directTransport
         session.manualIpAddress = manualIpAddress

@@ -199,10 +199,11 @@ void JniSession::start(JNIEnv* env, jobject transportPipe, jobject callback, job
     sdrConfig_.targetLayoutWidthDp = env->GetIntField(sdrConfig, env->GetFieldID(sdrClass, "targetLayoutWidthDp", "I"));
     env->DeleteLocalRef(sdrClass);
 
-    LOGI("Starting session: video=%dx%d@%dfps dpi=%d realDpi=%d pixelAspect=%d autoNeg=%d codec=%s targetLayoutDp=%d",
+    LOGI("Starting session: video=%dx%d@%dfps dpi=%d realDpi=%d pixelAspect=%d marginW=%d marginH=%d autoNeg=%d codec=%s targetLayoutDp=%d",
          sdrConfig_.videoWidth, sdrConfig_.videoHeight,
          sdrConfig_.videoFps, sdrConfig_.videoDpi, sdrConfig_.realDensity,
-         sdrConfig_.pixelAspectE4, sdrConfig_.autoNegotiate,
+         sdrConfig_.pixelAspectE4, sdrConfig_.marginWidth, sdrConfig_.marginHeight,
+         sdrConfig_.autoNegotiate,
          sdrConfig_.videoCodec.c_str(), sdrConfig_.targetLayoutWidthDp);
     if (sdrConfig_.safeAreaTop > 0 || sdrConfig_.safeAreaBottom > 0 ||
         sdrConfig_.safeAreaLeft > 0 || sdrConfig_.safeAreaRight > 0) {
@@ -616,7 +617,7 @@ void JniSession::onChannelOpenRequest(
 void JniSession::onMediaChannelSetupRequest(
     const aap_protobuf::service::media::shared::message::Setup& request)
 {
-    LOGI("Video setup: type=%d", request.type());
+    LOGI("Video setup from phone: type=%d (0=H264 1=H265 2=VP9)", request.type());
     negotiatedCodecType_ = request.type();
 
     // Notify Kotlin of the negotiated codec type so the decoder configures correctly
@@ -1140,10 +1141,12 @@ void JniSession::buildServiceDiscoveryResponse(
                  (int)ms.available_while_in_call());
             for (int v = 0; v < ms.video_configs_size(); v++) {
                 const auto& vc = ms.video_configs(v);
-                LOGI("    vc[%d] res=%d fps=%d dpi=%d codec=%d pixel_aspect=%d",
+                LOGI("    vc[%d] res=%d fps=%d dpi=%d codec=%d pixel_aspect=%d wMargin=%d hMargin=%d",
                      v, (int)vc.codec_resolution(), (int)vc.frame_rate(),
                      vc.density(), (int)vc.video_codec_type(),
-                     vc.has_pixel_aspect_ratio_e4() ? vc.pixel_aspect_ratio_e4() : 0);
+                     vc.has_pixel_aspect_ratio_e4() ? vc.pixel_aspect_ratio_e4() : 0,
+                     vc.has_width_margin() ? vc.width_margin() : 0,
+                     vc.has_height_margin() ? vc.height_margin() : 0);
             }
         } else if (ch.has_media_source_service()) {
             LOGI("  ch[%d] id=%d media_source: avail_type=%d", i, ch.id(),
