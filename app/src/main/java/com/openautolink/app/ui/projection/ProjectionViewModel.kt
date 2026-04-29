@@ -26,6 +26,9 @@ import com.openautolink.app.session.SessionState
 import com.openautolink.app.transport.direct.AaNearbyManager
 import com.openautolink.app.video.VideoStats
 import com.openautolink.app.diagnostics.OalLog
+import com.openautolink.app.diagnostics.DiagnosticLog
+import com.openautolink.app.diagnostics.FileLogWriter
+import com.openautolink.app.diagnostics.LogcatCapture
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -56,6 +59,8 @@ data class ProjectionUiState(
     val videoScalingMode: String = AppPreferences.DEFAULT_VIDEO_SCALING_MODE,
     val aaPixelAspect: Int = -1,
     val aaDpi: Int = 160,
+    val fileLoggingActive: Boolean = false,
+    val fileLoggingPath: String? = null,
 )
 
 class ProjectionViewModel(application: Application) : AndroidViewModel(application) {
@@ -96,6 +101,10 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
     private val _audioStats = MutableStateFlow(AudioStats())
     private val _showStats = MutableStateFlow(false)
     private val _showPhoneChooser = MutableStateFlow(false)
+    private val _fileLoggingActive = MutableStateFlow(false)
+    private val _fileLoggingPath = MutableStateFlow<String?>(null)
+    private var fileLogWriter: FileLogWriter? = null
+    private var logcatCapture: LogcatCapture? = null
 
     // Pending surface — stored when surfaceCreated fires before decoder exists.
     // Attached to decoder on session start or when decoder becomes available.
@@ -148,6 +157,8 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
         sessionManager.wifiFrequencyMhz,
         preferences.aaDpi,
         preferences.aaPixelAspect,
+        _fileLoggingActive,
+        _fileLoggingPath,
     ) { values ->
         ProjectionUiState(
             sessionState = values[0] as SessionState,
@@ -170,6 +181,8 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
             wifiFrequencyMhz = values[17] as Int,
             aaDpi = values[18] as Int,
             aaPixelAspect = values[19] as Int,
+            fileLoggingActive = values[20] as Boolean,
+            fileLoggingPath = values[21] as? String,
         )
     }.stateIn(
         viewModelScope,
@@ -215,18 +228,17 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    private var hasConnected = false
+    @Volatile private var hasConnected = false
+    private val connectLock = Any()
 
     fun connect() {
-        if (hasConnected && sessionManager.sessionState.value != SessionState.IDLE) {
-            // Session is already running — don't restart.
-            // This prevents reconnect when navigating back from Settings
-            // or when the app resumes from background.
-            // But check if cluster needs relaunching (Templates Host may have killed it).
-            sessionManager.ensureClusterAlive()
-            return
+        synchronized(connectLock) {
+            if (hasConnected && sessionManager.sessionState.value != SessionState.IDLE) {
+                sessionManager.ensureClusterAlive()
+                return
+            }
+            hasConnected = true
         }
-        hasConnected = true
         viewModelScope.launch {
             val codec = preferences.videoCodec.first()
             val micSrc = preferences.micSource.first()
@@ -425,6 +437,48 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
         _showStats.value = !_showStats.value
     }
 
+    private var fileLogToggleLock = Any()
+
+    fun toggleFileLogging() {
+        synchronized(fileLogToggleLock) {
+            if (_fileLoggingActive.value) {
+                // Stop
+                logcatCapture?.stop()
+                logcatCapture = null
+                fileLogWriter?.stop()
+                DiagnosticLog.fileLogWriter = null
+                fileLogWriter = null
+                _fileLoggingActive.value = false
+                _fileLoggingPath.value = null
+            } else {
+                // Start
+                val writer = FileLogWriter(getApplication())
+                val path = writer.start()
+                if (path != null) {
+                    fileLogWriter = writer
+                    DiagnosticLog.fileLogWriter = writer
+                    _fileLoggingActive.value = true
+                    _fileLoggingPath.value = path
+                    // Write existing ring buffer entries so we have context
+                    writer.writeExistingLogs(DiagnosticLog.localLogs.value)
+
+                    // Optionally start logcat capture if enabled in settings
+                    viewModelScope.launch {
+                        val captureEnabled = preferences.logcatCaptureEnabled.first()
+                        if (captureEnabled) {
+                            val logDir = java.io.File(path).parentFile
+                            if (logDir != null) {
+                                val capture = LogcatCapture()
+                                capture.start(logDir)
+                                logcatCapture = capture
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /** Forward a touch event from the projection surface to the bridge. */
     fun onTouchEvent(event: MotionEvent, surfaceWidth: Int, surfaceHeight: Int) {
         // Use video stats dimensions — the phone renders AA at whatever resolution
@@ -524,6 +578,10 @@ class ProjectionViewModel(application: Application) : AndroidViewModel(applicati
         try {
             connectivityManager.unregisterNetworkCallback(transportNetworkCallback)
         } catch (_: Exception) {}
+        // Stop file logging if active
+        logcatCapture?.stop()
+        fileLogWriter?.stop()
+        DiagnosticLog.fileLogWriter = null
         sessionManager.stop()
         super.onCleared()
     }
