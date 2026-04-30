@@ -82,10 +82,30 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
-      - name: Decode keystore
-        run: |
-          mkdir -p secrets
-          echo "${{ secrets.UPLOAD_KEYSTORE_BASE64 }}" | base64 -d > secrets/upload-key.jks
+- name: Decode and verify keystore
+  env:
+    UPLOAD_KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
+    UPLOAD_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
+  run: |
+    mkdir -p secrets
+
+    echo "Password length: ${#UPLOAD_KEY_PASSWORD}"
+
+    echo "Base64 character count:"
+    printf "%s" "$UPLOAD_KEYSTORE_BASE64" | wc -c
+
+    printf "%s" "$UPLOAD_KEYSTORE_BASE64" | base64 -d > secrets/upload-key.jks
+
+    echo "Decoded keystore SHA256:"
+    sha256sum secrets/upload-key.jks
+
+    echo "Testing keystore:"
+    keytool -list \
+      -keystore secrets/upload-key.jks \
+      -storepass "$UPLOAD_KEY_PASSWORD" \
+      -alias upload
+
+    echo "Keystore opened successfully."
 
       - name: Build signed AAB
         env:
