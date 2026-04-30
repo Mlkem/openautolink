@@ -1,0 +1,34 @@
+name: Test Signing Secrets
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-signing:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Decode and inspect keystore without exposing secrets
+        env:
+          UPLOAD_KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
+          UPLOAD_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
+        run: |
+          mkdir -p secrets
+
+          echo "Password length: ${#UPLOAD_KEY_PASSWORD}"
+
+          echo "Base64 character count:"
+          printf "%s" "$UPLOAD_KEYSTORE_BASE64" | wc -c
+
+          printf "%s" "$UPLOAD_KEYSTORE_BASE64" | base64 -d > secrets/upload-key.jks
+
+          echo "Decoded keystore SHA256:"
+          sha256sum secrets/upload-key.jks
+
+          echo "Testing keystore:"
+          keytool -list \
+            -keystore secrets/upload-key.jks \
+            -storepass "$UPLOAD_KEY_PASSWORD" \
+            -alias upload
+
+          echo "Keystore opened successfully."
