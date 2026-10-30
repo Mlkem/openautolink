@@ -8,8 +8,8 @@
 >
 > **⚠️ Under active development.** Core car connections and AA functionality are working. See [Known Issues](#known-issues) for current limitations.
 
-[![CI](https://github.com/mossyhub/openautolink/actions/workflows/ci.yml/badge.svg)](https://github.com/mossyhub/openautolink/actions/workflows/ci.yml)
-[![Release](https://github.com/mossyhub/openautolink/actions/workflows/release-apk.yml/badge.svg)](https://github.com/mossyhub/openautolink/releases/latest)
+[![CI](https://github.com/Mlkem/openautolink/actions/workflows/ci.yml/badge.svg)](https://github.com/Mlkem/openautolink/actions/workflows/ci.yml)
+[![Release](https://github.com/Mlkem/openautolink/actions/workflows/release-apk.yml/badge.svg)](https://github.com/Mlkem/openautolink/releases/latest)
 
 OpenAutoLink runs the full Android Auto protocol stack natively on an AAOS head unit using the [aasdk](https://github.com/opencardev/aasdk) C++ library via JNI. No SBC, no USB adapter, no extra hardware — the car and phone talk directly over WiFi.
 
@@ -113,14 +113,14 @@ Install the **OpenAutoLink Companion** app on your phone. It handles:
 - Android Auto Service auto-start detection
 - Custom device name for multi-phone identification
 
-You can either download a prebuilt APK from [GitHub Actions](https://github.com/mossyhub/openautolink/actions/workflows/build-companion.yml) (click the latest run → Artifacts → `companion-debug-apk`) or build it yourself from the `companion/` directory.
+You can either download a prebuilt APK from [GitHub Actions](https://github.com/Mlkem/openautolink/actions/workflows/build-companion.yml) (click the latest run → Artifacts → `companion-debug-apk`) or build it yourself from the `companion/` directory.
 
 ## Quick Start
 
 ### 1. Install the Companion App (Phone)
 
 **Option A — Download prebuilt APK:**
-1. Go to [Build Companion APK](https://github.com/mossyhub/openautolink/actions/workflows/build-companion.yml) on GitHub Actions.
+1. Go to [Build Companion APK](https://github.com/Mlkem/openautolink/actions/workflows/build-companion.yml) on GitHub Actions.
 2. Click the latest successful run.
 3. Download the `companion-debug-apk` artifact.
 4. Unzip and install the APK on your phone (enable "Install from unknown sources" if prompted).
@@ -180,7 +180,7 @@ Because this is an AAOS app, installation on the car goes through your own Googl
 
 The C++ JNI layer links against prebuilt static libraries (OpenSSL, Boost, aasdk + protobuf + abseil). These are built once and cached:
 
-- **CI builds** download them automatically from a [GitHub Release](https://github.com/mossyhub/openautolink/releases/tag/native-deps).
+- **CI builds** download them automatically from a [GitHub Release](https://github.com/Mlkem/openautolink/releases/tag/native-deps).
 - **Local builds** (WSL): run the build scripts once, then Gradle finds them:
   ```bash
   scripts/build-openssl-android.sh    # OpenSSL for ARM64
@@ -231,7 +231,7 @@ The app embeds aasdk as a prebuilt static library (`.a`) and links it via CMake/
 
 ### Historical
 
-The original architecture used an SBC (single-board computer) running a C++ bridge binary and Python Bluetooth/WiFi scripts to relay Android Auto from the phone to the car over Ethernet. That was replaced by direct mode. The app initially reimplemented the AA protocol in Kotlin, which was then replaced by the current aasdk C++ JNI approach for protocol correctness and performance. The bridge code is preserved on the [`bridge-mode`](https://github.com/mossyhub/openautolink/tree/bridge-mode) branch.
+The original architecture used an SBC (single-board computer) running a C++ bridge binary and Python Bluetooth/WiFi scripts to relay Android Auto from the phone to the car over Ethernet. That was replaced by direct mode. The app initially reimplemented the AA protocol in Kotlin, which was then replaced by the current aasdk C++ JNI approach for protocol correctness and performance. The bridge code is preserved on the [`bridge-mode`](https://github.com/Mlkem/openautolink/tree/bridge-mode) branch.
 
 ## Documentation
 
@@ -272,7 +272,7 @@ Active development, stable for daily driving on a 2024 Chevrolet Blazer EV.
 - **VHAL data and sensors** not flowing into AA properly — vehicle speed, gear, parking brake etc. not reaching the phone
 - **Cluster service** not working — navigation turn-by-turn data not appearing on the instrument cluster
 
-If you encounter other problems, please [open an issue](https://github.com/mossyhub/openautolink/issues).
+If you encounter other problems, please [open an issue](https://github.com/Mlkem/openautolink/issues).
 
 ## Compatibility
 
