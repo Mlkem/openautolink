@@ -1,12 +1,12 @@
 name: Fork Build
 
-# For fork users: builds a signed AAB with a custom applicationId.
-# Set these secrets on your fork:
-#   APP_ID                  — your unique application ID (e.g. com.johndoe.autolink)
-#   UPLOAD_KEYSTORE_BASE64  — base64-encoded upload keystore (.jks)
-#   UPLOAD_KEY_PASSWORD     — keystore and key password
+# Builds a signed car AAB with a custom applicationId plus the companion APK.
+# Required repository secrets:
+#   APP_ID
+#   UPLOAD_KEYSTORE_BASE64
+#   UPLOAD_KEY_PASSWORD
 #
-# Native deps are downloaded from the upstream repo's public release.
+# Native dependencies are downloaded from the upstream public release.
 
 on:
   workflow_dispatch:
@@ -18,14 +18,13 @@ on:
       - 'build.gradle.kts'
       - 'settings.gradle.kts'
       - 'gradle/**'
+      - '.github/workflows/fork-build.yml'
 
 permissions:
   contents: write
 
 jobs:
   build:
-    # Skip on the upstream repo — this workflow is only for forks
-    if: github.repository != 'mossyhub/openautolink'
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -43,7 +42,6 @@ jobs:
           if [ -z "${{ secrets.UPLOAD_KEY_PASSWORD }}" ]; then missing="$missing UPLOAD_KEY_PASSWORD"; fi
           if [ -n "$missing" ]; then
             echo "::error::Missing required secrets:$missing"
-            echo "See README.md for setup instructions."
             exit 1
           fi
 
@@ -62,13 +60,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Download from upstream public release — no auth needed
           for ABI in arm64-v8a x86_64; do
-            echo "Downloading native-deps-${ABI}.tar.gz from upstream..."
-            gh release download native-deps \
-              -R mossyhub/openautolink \
-              -p "native-deps-${ABI}.tar.gz" \
-              -O "/tmp/native-deps-${ABI}.tar.gz"
+            gh release download native-deps               -R mossyhub/openautolink               -p "native-deps-${ABI}.tar.gz"               -O "/tmp/native-deps-${ABI}.tar.gz"
             tar xzf "/tmp/native-deps-${ABI}.tar.gz" -C app/src/main/cpp/
           done
 
@@ -82,51 +75,33 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
-- name: Decode and verify keystore
-  env:
-    UPLOAD_KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
-    UPLOAD_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
-  run: |
-    mkdir -p secrets
+      - name: Decode and verify keystore
+        env:
+          UPLOAD_KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
+          UPLOAD_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
+        run: |
+          mkdir -p secrets
+          printf "%s" "$UPLOAD_KEYSTORE_BASE64" | base64 -d > secrets/upload-key.jks
+          keytool -list             -keystore secrets/upload-key.jks             -storepass "$UPLOAD_KEY_PASSWORD"             -alias upload
 
-    echo "Password length: ${#UPLOAD_KEY_PASSWORD}"
-
-    echo "Base64 character count:"
-    printf "%s" "$UPLOAD_KEYSTORE_BASE64" | wc -c
-
-    printf "%s" "$UPLOAD_KEYSTORE_BASE64" | base64 -d > secrets/upload-key.jks
-
-    echo "Decoded keystore SHA256:"
-    sha256sum secrets/upload-key.jks
-
-    echo "Testing keystore:"
-    keytool -list \
-      -keystore secrets/upload-key.jks \
-      -storepass "$UPLOAD_KEY_PASSWORD" \
-      -alias upload
-
-    echo "Keystore opened successfully."
-
-      - name: Build signed AAB
+      - name: Build signed car AAB
         env:
           UPLOAD_KEY_ALIAS: upload
           UPLOAD_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
           UPLOAD_STORE_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew :app:bundleRelease \
-            -PappId="${{ secrets.APP_ID }}" \
-            --no-daemon
+          ./gradlew :app:bundleRelease             -PappId="${{ secrets.APP_ID }}"             --no-daemon
 
       - name: Build companion APK
         run: |
           ./gradlew :companion:assembleRelease --no-daemon
 
-      - name: Get version
+      - name: Read version
         id: version
         run: |
-          VERSION=$(grep 'versionName' secrets/version.properties | cut -d= -f2)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          VERSION=$(grep 'versionName' app/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Create release
         env:
@@ -135,14 +110,8 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           TAG="v${VERSION}-$(date -u +%Y%m%d%H%M%S)"
 
-          # Rename outputs
-          mv app/build/outputs/bundle/release/app-release.aab \
-             "app/build/outputs/bundle/release/openautolink-car-${VERSION}.aab"
-          mv companion/build/outputs/apk/release/companion-release.apk \
-             "companion/build/outputs/apk/release/openautolink-companion-${VERSION}.apk"
+          mv app/build/outputs/bundle/release/app-release.aab              "app/build/outputs/bundle/release/openautolink-car-${VERSION}.aab"
 
-          gh release create "$TAG" \
-            --title "OpenAutoLink v${VERSION}" \
-            --notes "Built from $(git rev-parse --short HEAD) with applicationId \`${{ secrets.APP_ID }}\`" \
-            "app/build/outputs/bundle/release/openautolink-car-${VERSION}.aab" \
-            "companion/build/outputs/apk/release/openautolink-companion-${VERSION}.apk"
+          mv companion/build/outputs/apk/release/companion-release.apk              "companion/build/outputs/apk/release/openautolink-companion-${VERSION}.apk"
+
+          gh release create "$TAG"             --title "OpenAutoLink v${VERSION}"             --notes "Built from $(git rev-parse --short HEAD) with the configured custom applicationId."             "app/build/outputs/bundle/release/openautolink-car-${VERSION}.aab"             "companion/build/outputs/apk/release/openautolink-companion-${VERSION}.apk"
